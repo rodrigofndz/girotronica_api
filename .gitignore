@@ -1,0 +1,19 @@
+node_modules/
+.pnpm-store/
+
+# build output
+web/dist/
+functions/lib/
+
+# firebase local state
+.firebase/
+*-debug.log
+.runtimeconfig.json
+emulator-data/
+
+# secrets
+.env
+.env.local
+.env.*.local
+*service-account*.json
+serviceAccountKey.json
