@@ -5,6 +5,8 @@ import { Hono } from "hono";
 import { logger } from "hono/logger";
 
 import { type Env, requireAuth, requireRole } from "./auth";
+import { tickets } from "./tickets";
+
 
 initializeApp();
 
@@ -16,6 +18,7 @@ app.get("/health", (c) => c.json({ ok: true }));
 
 app.use("*", requireAuth);
 app.get("/me", (c) => c.json(c.get("user")));
+app.route("/tickets", tickets);
 app.get("/admin/ping", requireRole("admin"), (c) => c.json({ ok: true }));
 
 export const api = onRequest(
