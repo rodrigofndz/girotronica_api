@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix functions run build",
+    "watch": "npm --prefix functions run build:watch",
+    "dev": "firebase emulators:start",
+    "deploy": "firebase deploy --only functions"
+  }
+}
