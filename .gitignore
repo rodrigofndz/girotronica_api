@@ -17,3 +17,5 @@ emulator-data/
 .env.*.local
 *service-account*.json
 serviceAccountKey.json
+.claude/settings.local.json
+.claude/
