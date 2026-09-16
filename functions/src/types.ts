@@ -10,6 +10,12 @@ export type TicketType = {
   price: number;          // cents
   capacity: number | null;
   isLanParty: boolean;
+  days: string[];          // ISO dates (YYYY-MM-DD) this type grants access to
+};
+
+export type CheckIn = {
+  at: FirebaseFirestore.Timestamp;
+  by: string;
 };
 
 export type Ticket = {
@@ -23,6 +29,7 @@ export type Ticket = {
   paymentMethod: PaymentMethod;
   soldBy: string | null;
   purchasedAt: FirebaseFirestore.Timestamp;
-  checkedInAt: FirebaseFirestore.Timestamp | null;
-  checkedInBy: string | null;
+  days: string[];               // ISO dates (YYYY-MM-DD) this ticket grants access to,
+                                 // denormalized from the ticket type at purchase time
+  checkins: Record<string, CheckIn>;  // keyed by ISO date
 };

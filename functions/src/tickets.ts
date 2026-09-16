@@ -21,7 +21,10 @@ tickets.get("/", async (c) => {
       typeId: t.typeId,
       code: t.code,
       holderName: t.holderName,
-      checkedInAt: t.checkedInAt?.toDate() ?? null,
+      days: t.days,
+      checkins: Object.fromEntries(
+        Object.entries(t.checkins ?? {}).map(([day, c]) => [day, c.at.toDate()]),
+      ),
     };
   });
 
