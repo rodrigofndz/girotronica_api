@@ -23,4 +23,6 @@ export type Ticket = {
   paymentMethod: PaymentMethod;
   soldBy: string | null;
   purchasedAt: FirebaseFirestore.Timestamp;
-  checkedInAt:
+  checkedInAt: FirebaseFirestore.Timestamp | null;
+  checkedInBy: string | null;
+};

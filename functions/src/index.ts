@@ -10,7 +10,7 @@ import { tickets } from "./tickets";
 
 initializeApp();
 
-const app = new Hono().basePath("/api");
+const app = new Hono<Env>().basePath("/api");
 
 app.use(logger());
 
