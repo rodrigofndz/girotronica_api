@@ -11,8 +11,10 @@ import { stripeSecretKey, stripeWebhook, stripeWebhookSecret } from "./stripe";
 import { ROLES } from "./types";
 import { checkin } from "./tickets/checkin";
 import { doorSale } from "./tickets/doorSale";
+import { ticketLookup } from "./tickets/lookup";
 import { tickets } from "./tickets/tickets";
 import { lanParty } from "./users/lanParty";
+import { userLookup } from "./users/lookup";
 import { staff } from "./users/staff";
 
 
@@ -81,7 +83,9 @@ app.openapi(
 app.route("/tickets", tickets);
 app.route("/tickets/checkin", checkin);
 app.route("/tickets/door", doorSale);
+app.route("/tickets/by-email", ticketLookup);
 app.route("/users/lan-party", lanParty);
+app.route("/users/by-email", userLookup);
 app.route("/users", staff);
 
 app.openapi(
