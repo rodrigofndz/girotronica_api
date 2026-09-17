@@ -1,7 +1,7 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 
-import { requireRole, type Env } from "../auth";
+import { requireStaff, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
 import { TICKET_STATUSES, type Ticket } from "../types";
 
@@ -37,7 +37,7 @@ const checkinRoute = createRoute({
     "Staff or admin. Uses the server's current event day (Europe/Madrid). " +
     "Always returns 200; the outcome is in `result`, so a retried scan never looks like a failure.",
   security: bearerAuth,
-  middleware: [requireRole("staff", "admin")] as const,
+  middleware: [requireStaff] as const,
   request: {
     body: {
       required: true,

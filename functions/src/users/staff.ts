@@ -2,7 +2,7 @@ import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
-import { requireRole, type Env } from "../auth";
+import { requireAdmin, type Env } from "../auth";
 import { bearerAuth, UserProfileSchema } from "../schemas";
 import type { Role, UserProfile, UserProfileWrite } from "../types";
 
@@ -53,7 +53,7 @@ staff.openapi(
     summary: "Promote a user to staff",
     description: "Admin only. Takes effect on the user's next request.",
     security: bearerAuth,
-    middleware: [requireRole("admin")] as const,
+    middleware: [requireAdmin] as const,
     request: { params },
     responses,
   }),
@@ -68,7 +68,7 @@ staff.openapi(
     summary: "Demote a staff member back to user",
     description: "Admin only. Takes effect on the user's next request.",
     security: bearerAuth,
-    middleware: [requireRole("admin")] as const,
+    middleware: [requireAdmin] as const,
     request: { params },
     responses,
   }),

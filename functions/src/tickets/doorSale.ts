@@ -4,7 +4,7 @@ import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
-import { requireRole, type Env } from "../auth";
+import { requireStaff, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
 import { PAYMENT_METHODS, type TicketType, type TicketWrite } from "../types";
 
@@ -40,7 +40,7 @@ const doorSaleRoute = createRoute({
     "Staff or admin. Tickets are created active with no account attached; " +
     "`soldBy` and `paymentMethod` are recorded for till reconciliation.",
   security: bearerAuth,
-  middleware: [requireRole("staff", "admin")] as const,
+  middleware: [requireStaff] as const,
   request: {
     body: { required: true, content: { "application/json": { schema: DoorSaleSchema } } },
   },

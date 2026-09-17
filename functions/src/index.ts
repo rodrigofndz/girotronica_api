@@ -5,7 +5,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import { logger } from "hono/logger";
 import { Scalar } from "@scalar/hono-api-reference";
 
-import { type Env, requireAuth, requireRole } from "./auth";
+import { type Env, requireAuth, requireAdmin } from "./auth";
 import { bearerAuth } from "./schemas";
 import { stripeSecretKey, stripeWebhook, stripeWebhookSecret } from "./stripe";
 import { ROLES } from "./types";
@@ -91,7 +91,7 @@ app.openapi(
     tags: ["System"],
     summary: "Admin role smoke test",
     security: bearerAuth,
-    middleware: [requireRole("admin")] as const,
+    middleware: [requireAdmin] as const,
     responses: {
       200: { description: "Caller is admin", content: { "application/json": { schema: OkSchema } } },
       403: { description: "Caller is not admin" },

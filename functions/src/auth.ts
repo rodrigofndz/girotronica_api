@@ -55,10 +55,15 @@ export const requireAuth = createMiddleware<Env>(async (c, next) => {
   await next();
 });
 
-export const requireRole = (...roles: Role[]) =>
+const requireRole = (...roles: Role[]) =>
   createMiddleware<Env>(async (c, next) => {
     if (!roles.includes(c.get("user").role)) {
       throw new HTTPException(403, { message: "insufficient role" });
     }
     await next();
   });
+
+/** Door and back-office operations: admins can do everything staff can. */
+export const requireStaff = requireRole("staff", "admin");
+
+export const requireAdmin = requireRole("admin");
