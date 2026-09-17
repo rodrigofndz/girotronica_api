@@ -5,6 +5,7 @@ import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
 import { requireStaff, type Env } from "../auth";
+import { queueTicketEmails } from "../mail";
 import { bearerAuth } from "../schemas";
 import { PAYMENT_METHODS, type TicketType, type TicketWrite } from "../types";
 
@@ -95,6 +96,21 @@ doorSale.openapi(doorSaleRoute, async (c) => {
   });
 
   await batch.commit();
+
+  // The ticket is the source of truth; if queueing the email fails, staff still has the
+  // code on screen and can resend it from the lookup
+  try {
+    await queueTicketEmails(
+      items.map((item, i) => ({
+        code: codes[i],
+        holderName: item.holderName,
+        holderEmail: item.holderEmail,
+        days: types.get(item.typeId)!.days,
+      })),
+    );
+  } catch (err) {
+    console.error("failed to queue door sale ticket email", err);
+  }
 
   return c.json(
     items.map((item, i) => ({

@@ -4,7 +4,8 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
 
-import type { TicketWrite } from "./types";
+import { queueTicketEmails } from "./mail";
+import type { Ticket, TicketWrite } from "./types";
 
 export const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 export const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
@@ -52,16 +53,37 @@ stripeWebhook.post("/", async (c) => {
       const db = getFirestore();
 
       if (ticketIds.length > 0) {
-        await db.runTransaction(async (tx) => {
+        const activated = await db.runTransaction(async (tx) => {
           const refs = ticketIds.map((id) => db.doc(`tickets/${id}`));
           const docs = await tx.getAll(...refs);
+          const justActivated: Ticket[] = [];
 
           for (const doc of docs) {
-            if (doc.exists && doc.data()?.status === "pending") {
+            const ticket = doc.data() as Ticket | undefined;
+            if (doc.exists && ticket?.status === "pending") {
               tx.update(doc.ref, { status: "active" } satisfies Partial<TicketWrite>);
+              justActivated.push(ticket);
             }
           }
+
+          return justActivated;
         });
+
+        // Only the tickets this delivery activated, so a Stripe retry can't send them twice
+        if (activated.length > 0) {
+          try {
+            await queueTicketEmails(
+              activated.map((t) => ({
+                code: t.code,
+                holderName: t.holderName,
+                holderEmail: t.holderEmail,
+                days: t.days,
+              })),
+            );
+          } catch (err) {
+            console.error("failed to queue purchase ticket email", err);
+          }
+        }
       }
     }
   }
