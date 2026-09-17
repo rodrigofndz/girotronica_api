@@ -7,9 +7,9 @@ import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
 import { z } from "zod";
 
-import type { Env } from "./auth";
-import { frontendUrl, stripeSecretKey } from "./stripe";
-import type { Ticket, TicketType } from "./types";
+import type { Env } from "../auth";
+import { frontendUrl, stripeSecretKey } from "../stripe";
+import type { Ticket, TicketType } from "../types";
 
 export const tickets = new Hono<Env>();
 

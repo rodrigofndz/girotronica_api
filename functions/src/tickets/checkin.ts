@@ -3,8 +3,8 @@ import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { Hono } from "hono";
 import { z } from "zod";
 
-import { requireRole, type Env } from "./auth";
-import type { Ticket } from "./types";
+import { requireRole, type Env } from "../auth";
+import type { Ticket } from "../types";
 
 export const checkin = new Hono<Env>();
 
