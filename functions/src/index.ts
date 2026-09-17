@@ -9,6 +9,7 @@ import { stripeSecretKey, stripeWebhook, stripeWebhookSecret } from "./stripe";
 import { checkin } from "./tickets/checkin";
 import { doorSale } from "./tickets/doorSale";
 import { tickets } from "./tickets/tickets";
+import { lanParty } from "./users/lanParty";
 
 
 initializeApp();
@@ -25,6 +26,7 @@ app.get("/me", (c) => c.json(c.get("user")));
 app.route("/tickets", tickets);
 app.route("/tickets/checkin", checkin);
 app.route("/tickets/door", doorSale);
+app.route("/users/lan-party", lanParty);
 app.get("/admin/ping", requireRole("admin"), (c) => c.json({ ok: true }));
 
 export const api = onRequest(

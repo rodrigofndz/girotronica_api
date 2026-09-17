@@ -64,6 +64,7 @@ doorSale.post(
         soldBy,
         purchasedAt: FieldValue.serverTimestamp(),
         days: type.days,
+        isLanParty: type.isLanParty,
         checkins: {},
       });
     });

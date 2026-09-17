@@ -31,5 +31,6 @@ export type Ticket = {
   purchasedAt: FirebaseFirestore.Timestamp;
   days: string[];               // ISO dates (YYYY-MM-DD) this ticket grants access to,
                                  // denormalized from the ticket type at purchase time
+  isLanParty: boolean;           // denormalized from the ticket type, for the member list query
   checkins: Record<string, CheckIn>;  // keyed by ISO date
 };

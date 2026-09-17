@@ -86,6 +86,7 @@ tickets.post("/", zValidator("json", purchaseSchema), async (c) => {
       soldBy: null,
       purchasedAt: FieldValue.serverTimestamp(),
       days: type.days,
+      isLanParty: type.isLanParty,
       checkins: {},
     });
   });
