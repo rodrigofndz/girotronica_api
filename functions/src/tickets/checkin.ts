@@ -3,7 +3,7 @@ import { FieldValue, getFirestore } from "firebase-admin/firestore";
 
 import { requireRole, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
-import type { Ticket } from "../types";
+import { TICKET_STATUSES, type Ticket } from "../types";
 
 export const checkin = new OpenAPIHono<Env>();
 
@@ -24,7 +24,7 @@ const CheckinResultSchema = z.discriminatedUnion("result", [
     checkedInBy: z.string(),
   }),
   z.object({ result: z.literal("wrong_day"), days: z.array(z.string()) }),
-  z.object({ result: z.literal("invalid"), status: z.enum(["pending", "active", "cancelled"]) }),
+  z.object({ result: z.literal("invalid"), status: z.enum(TICKET_STATUSES) }),
   z.object({ result: z.literal("not_found") }),
 ]);
 

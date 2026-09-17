@@ -4,6 +4,8 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
 
+import type { TicketWrite } from "./types";
+
 export const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 export const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
 export const frontendUrl = defineString("FRONTEND_URL", {
@@ -56,7 +58,7 @@ stripeWebhook.post("/", async (c) => {
 
           for (const doc of docs) {
             if (doc.exists && doc.data()?.status === "pending") {
-              tx.update(doc.ref, { status: "active" });
+              tx.update(doc.ref, { status: "active" } satisfies Partial<TicketWrite>);
             }
           }
         });

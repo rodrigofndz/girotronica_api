@@ -6,12 +6,12 @@ import { HTTPException } from "hono/http-exception";
 
 import { requireRole, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
-import type { TicketType } from "../types";
+import { PAYMENT_METHODS, type TicketType, type TicketWrite } from "../types";
 
 export const doorSale = new OpenAPIHono<Env>();
 
 const DoorSaleSchema = z.object({
-  paymentMethod: z.enum(["cash", "card_terminal"]),
+  paymentMethod: z.enum(PAYMENT_METHODS).exclude(["stripe"]),
   items: z
     .array(
       z.object({
@@ -91,7 +91,7 @@ doorSale.openapi(doorSaleRoute, async (c) => {
       days: type.days,
       isLanParty: type.isLanParty,
       checkins: {},
-    });
+    } satisfies TicketWrite);
   });
 
   await batch.commit();

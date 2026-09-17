@@ -3,7 +3,7 @@ import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 
-import type { Role, UserProfile } from "./types";
+import type { Role, UserProfile, UserProfileWrite } from "./types";
 
 export type User = { uid: string; email?: string; role: Role };
 export type Env = { Variables: { user: User } };
@@ -33,12 +33,17 @@ export const requireAuth = createMiddleware<Env>(async (c, next) => {
   if (!profile) {
     // A concurrent first request may have created it already; that one wins
     await ref
-      .create({ role: "user", email, displayName, createdAt: FieldValue.serverTimestamp() })
+      .create({
+        role: "user",
+        email,
+        displayName,
+        createdAt: FieldValue.serverTimestamp(),
+      } satisfies UserProfileWrite)
       .catch((err) => {
         if (err.code !== ALREADY_EXISTS) throw err;
       });
   } else if (profile.email !== email || profile.displayName !== displayName) {
-    await ref.update({ email, displayName });
+    await ref.update({ email, displayName } satisfies Partial<UserProfileWrite>);
   }
 
   c.set("user", {

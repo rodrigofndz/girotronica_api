@@ -1,4 +1,12 @@
-export type Role = "user" | "staff" | "admin";
+// Each list below is the single source for both its TypeScript type and its Zod schemas
+export const ROLES = ["user", "staff", "admin"] as const;
+export type Role = (typeof ROLES)[number];
+
+export const TICKET_STATUSES = ["pending", "active", "cancelled"] as const;
+export type TicketStatus = (typeof TICKET_STATUSES)[number];
+
+export const PAYMENT_METHODS = ["stripe", "cash", "card_terminal"] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 export type UserProfile = {
   role: Role;
@@ -6,10 +14,6 @@ export type UserProfile = {
   displayName: string | null;
   createdAt: FirebaseFirestore.Timestamp;
 };
-
-export type TicketStatus = "pending" | "active" | "cancelled";
-
-export type PaymentMethod = "stripe" | "cash" | "card_terminal";
 
 export type TicketType = {
   id: string;
@@ -41,3 +45,14 @@ export type Ticket = {
   isLanParty: boolean;           // denormalized from the ticket type, for the member list query
   checkins: Record<string, CheckIn>;  // keyed by ISO date
 };
+
+/** A stored type as it is written: timestamps may be serverTimestamp() sentinels. */
+type Written<T> = {
+  [K in keyof T]: FirebaseFirestore.Timestamp extends T[K]
+    ? T[K] | FirebaseFirestore.FieldValue
+    : T[K];
+};
+
+export type TicketWrite = Omit<Written<Ticket>, "id">;
+
+export type UserProfileWrite = Written<UserProfile>;

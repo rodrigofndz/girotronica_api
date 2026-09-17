@@ -8,7 +8,7 @@ import Stripe from "stripe";
 import type { Env } from "../auth";
 import { bearerAuth, CheckinsSchema, checkinTimes } from "../schemas";
 import { frontendUrl, stripeSecretKey } from "../stripe";
-import type { Ticket, TicketType } from "../types";
+import type { Ticket, TicketType, TicketWrite } from "../types";
 
 export const tickets = new OpenAPIHono<Env>();
 
@@ -131,7 +131,7 @@ tickets.openapi(purchaseRoute, async (c) => {
       days: type.days,
       isLanParty: type.isLanParty,
       checkins: {},
-    });
+    } satisfies TicketWrite);
   });
 
   await batch.commit();

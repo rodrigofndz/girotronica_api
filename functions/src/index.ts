@@ -8,6 +8,7 @@ import { Scalar } from "@scalar/hono-api-reference";
 import { type Env, requireAuth, requireRole } from "./auth";
 import { bearerAuth } from "./schemas";
 import { stripeSecretKey, stripeWebhook, stripeWebhookSecret } from "./stripe";
+import { ROLES } from "./types";
 import { checkin } from "./tickets/checkin";
 import { doorSale } from "./tickets/doorSale";
 import { tickets } from "./tickets/tickets";
@@ -66,7 +67,7 @@ app.openapi(
         description: "The authenticated user",
         content: {
           "application/json": {
-            schema: z.object({ uid: z.string(), email: z.string().optional(), role: z.string() }),
+            schema: z.object({ uid: z.string(), email: z.string().optional(), role: z.enum(ROLES) }),
           },
         },
       },
