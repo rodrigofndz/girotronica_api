@@ -45,6 +45,10 @@ checkin.post(
       const doc = await tx.get(ref);
       const t = doc.data() as Ticket;
 
+      if (t.status !== "active") {
+        return { result: "invalid" as const, status: t.status };
+      }
+
       if (!t.days.includes(day)) {
         return { result: "wrong_day" as const, days: t.days };
       }
