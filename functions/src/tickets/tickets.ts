@@ -1,19 +1,41 @@
 import { randomUUID } from "node:crypto";
 
-import { zValidator } from "@hono/zod-validator";
+import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
-import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
-import { z } from "zod";
 
 import type { Env } from "../auth";
+import { bearerAuth, CheckinsSchema, checkinTimes } from "../schemas";
 import { frontendUrl, stripeSecretKey } from "../stripe";
 import type { Ticket, TicketType } from "../types";
 
-export const tickets = new Hono<Env>();
+export const tickets = new OpenAPIHono<Env>();
 
-tickets.get("/", async (c) => {
+const OwnTicketSchema = z.object({
+  id: z.string(),
+  typeId: z.string(),
+  code: z.string(),
+  holderName: z.string(),
+  days: z.array(z.string()),
+  checkins: CheckinsSchema,
+});
+
+const listRoute = createRoute({
+  method: "get",
+  path: "/",
+  tags: ["Tickets"],
+  summary: "List the caller's active tickets",
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: "Active tickets owned by the caller",
+      content: { "application/json": { schema: z.array(OwnTicketSchema) } },
+    },
+  },
+});
+
+tickets.openapi(listRoute, async (c) => {
   const { uid } = c.get("user");
 
   const snap = await getFirestore()
@@ -30,16 +52,14 @@ tickets.get("/", async (c) => {
       code: t.code,
       holderName: t.holderName,
       days: t.days,
-      checkins: Object.fromEntries(
-        Object.entries(t.checkins ?? {}).map(([day, c]) => [day, c.at.toDate()]),
-      ),
+      checkins: checkinTimes(t.checkins),
     };
   });
 
-  return c.json(result);
+  return c.json(result, 200);
 });
 
-const purchaseSchema = z.object({
+const PurchaseSchema = z.object({
   items: z
     .array(
       z.object({
@@ -52,7 +72,30 @@ const purchaseSchema = z.object({
     .max(20),
 });
 
-tickets.post("/", zValidator("json", purchaseSchema), async (c) => {
+const purchaseRoute = createRoute({
+  method: "post",
+  path: "/",
+  tags: ["Tickets"],
+  summary: "Buy tickets online",
+  description:
+    "Creates the tickets as pending and returns a Stripe Checkout URL. " +
+    "The tickets become active when Stripe confirms payment through the webhook.",
+  security: bearerAuth,
+  request: {
+    body: { required: true, content: { "application/json": { schema: PurchaseSchema } } },
+  },
+  responses: {
+    200: {
+      description: "Checkout session created",
+      content: {
+        "application/json": { schema: z.object({ checkoutUrl: z.string().nullable() }) },
+      },
+    },
+    400: { description: "Invalid body or unknown ticket type" },
+  },
+});
+
+tickets.openapi(purchaseRoute, async (c) => {
   const { items } = c.req.valid("json");
   const { uid } = c.get("user");
   const db = getFirestore();
@@ -112,5 +155,5 @@ tickets.post("/", zValidator("json", purchaseSchema), async (c) => {
     metadata: { ticketIds: JSON.stringify(ticketRefs.map((ref) => ref.id)) },
   });
 
-  return c.json({ checkoutUrl: session.url });
+  return c.json({ checkoutUrl: session.url }, 200);
 });
