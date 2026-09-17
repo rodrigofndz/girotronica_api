@@ -1,5 +1,12 @@
 export type Role = "user" | "staff" | "admin";
 
+export type UserProfile = {
+  role: Role;
+  email: string | null;
+  displayName: string | null;
+  createdAt: FirebaseFirestore.Timestamp;
+};
+
 export type TicketStatus = "pending" | "active" | "cancelled";
 
 export type PaymentMethod = "stripe" | "cash" | "card_terminal";
