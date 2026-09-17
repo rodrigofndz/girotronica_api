@@ -13,6 +13,7 @@ import { checkin } from "./tickets/checkin";
 import { doorSale } from "./tickets/doorSale";
 import { tickets } from "./tickets/tickets";
 import { lanParty } from "./users/lanParty";
+import { staff } from "./users/staff";
 
 
 initializeApp();
@@ -81,6 +82,7 @@ app.route("/tickets", tickets);
 app.route("/tickets/checkin", checkin);
 app.route("/tickets/door", doorSale);
 app.route("/users/lan-party", lanParty);
+app.route("/users", staff);
 
 app.openapi(
   createRoute({

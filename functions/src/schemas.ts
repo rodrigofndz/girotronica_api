@@ -1,8 +1,15 @@
 import { z } from "@hono/zod-openapi";
 
-import type { Ticket } from "./types";
+import { ROLES, type Ticket } from "./types";
 
 export const bearerAuth = [{ Bearer: [] }];
+
+export const UserProfileSchema = z.object({
+  uid: z.string(),
+  email: z.string().nullable(),
+  displayName: z.string().nullable(),
+  role: z.enum(ROLES),
+});
 
 export const CheckinsSchema = z
   .record(z.string(), z.string())
