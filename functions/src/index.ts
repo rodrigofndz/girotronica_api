@@ -6,6 +6,7 @@ import { logger } from "hono/logger";
 
 import { type Env, requireAuth, requireRole } from "./auth";
 import { checkin } from "./checkin";
+import { stripeSecretKey, stripeWebhook, stripeWebhookSecret } from "./stripe";
 import { tickets } from "./tickets";
 
 
@@ -16,6 +17,7 @@ const app = new Hono<Env>().basePath("/api");
 app.use(logger());
 
 app.get("/health", (c) => c.json({ ok: true }));
+app.route("/stripe/webhook", stripeWebhook);
 
 app.use("*", requireAuth);
 app.get("/me", (c) => c.json(c.get("user")));
@@ -24,6 +26,6 @@ app.route("/checkin", checkin);
 app.get("/admin/ping", requireRole("admin"), (c) => c.json({ ok: true }));
 
 export const api = onRequest(
-  { region: "europe-west1", maxInstances: 10 },
+  { region: "europe-west1", maxInstances: 10, secrets: [stripeSecretKey, stripeWebhookSecret] },
   getRequestListener(app.fetch),
 );
