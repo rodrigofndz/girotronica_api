@@ -40,6 +40,7 @@ export type Ticket = {
   holderEmail: string;
   paymentMethod: PaymentMethod;
   soldBy: string | null;
+  paymentIntentId?: string | null; // set when Stripe confirms payment; links refunds back
   purchasedAt: FirebaseFirestore.Timestamp;
   days: string[];               // ISO dates (YYYY-MM-DD) this ticket grants access to,
                                  // denormalized from the ticket type at purchase time

@@ -50,6 +50,12 @@ stripeWebhook.post("/", async (c) => {
       const db = getFirestore();
 
       if (ticketIds.length > 0) {
+        // Recorded so a later refund can find the tickets this payment bought
+        const paymentIntentId =
+          typeof session.payment_intent === "string"
+            ? session.payment_intent
+            : (session.payment_intent?.id ?? null);
+
         const activated = await db.runTransaction(async (tx) => {
           const refs = ticketIds.map((id) => db.doc(`tickets/${id}`));
           const docs = await tx.getAll(...refs);
@@ -58,7 +64,10 @@ stripeWebhook.post("/", async (c) => {
           for (const doc of docs) {
             const ticket = doc.data() as Ticket | undefined;
             if (doc.exists && ticket?.status === "pending") {
-              tx.update(doc.ref, { status: "active" } satisfies Partial<TicketWrite>);
+              tx.update(doc.ref, {
+                status: "active",
+                paymentIntentId,
+              } satisfies Partial<TicketWrite>);
               justActivated.push(ticket);
             }
           }
