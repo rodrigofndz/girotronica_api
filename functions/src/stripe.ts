@@ -5,6 +5,7 @@ import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
 
 import { queueTicketEmails } from "./mail";
+import { cancelInTransaction } from "./tickets/cancel";
 import type { Ticket, TicketWrite } from "./types";
 
 export const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
@@ -89,6 +90,35 @@ stripeWebhook.post("/", async (c) => {
           } catch (err) {
             console.error("failed to queue purchase ticket email", err);
           }
+        }
+      }
+    }
+  }
+
+  if (event.type === "charge.refunded") {
+    const charge = event.data.object as Stripe.Charge;
+
+    // Partial refunds can't say which ticket was refunded, so they're left to an admin
+    if (charge.amount_refunded < charge.amount) {
+      console.warn(`partial refund on ${charge.id}; cancel the tickets by hand if needed`);
+    } else {
+      const paymentIntentId =
+        typeof charge.payment_intent === "string"
+          ? charge.payment_intent
+          : (charge.payment_intent?.id ?? null);
+
+      if (paymentIntentId) {
+        const db = getFirestore();
+        const snap = await db
+          .collection("tickets")
+          .where("paymentIntentId", "==", paymentIntentId)
+          .get();
+
+        if (!snap.empty) {
+          await db.runTransaction(async (tx) => {
+            const docs = await tx.getAll(...snap.docs.map((d) => d.ref));
+            cancelInTransaction(tx, docs);
+          });
         }
       }
     }
