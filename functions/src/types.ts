@@ -19,9 +19,10 @@ export type TicketType = {
   id: string;
   name: string;
   price: number;          // cents
-  capacity: number | null;
+  capacity: number | null; // null means unlimited
   isLanParty: boolean;
   days: string[];          // ISO dates (YYYY-MM-DD) this type grants access to
+  sold?: number;           // pending + active tickets; absent on hand-seeded docs
 };
 
 export type CheckIn = {

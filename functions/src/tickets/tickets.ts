@@ -2,14 +2,14 @@ import { randomUUID } from "node:crypto";
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
-import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
 
 import type { Env } from "../auth";
 import { bearerAuth, CheckinsSchema, checkinTimes } from "../schemas";
 import { frontendUrl } from "../config";
 import { stripeSecretKey } from "../stripe";
-import type { Ticket, TicketType, TicketWrite } from "../types";
+import type { Ticket, TicketWrite } from "../types";
+import { reserveCapacity } from "./capacity";
 
 export const tickets = new OpenAPIHono<Env>();
 
@@ -93,6 +93,7 @@ const purchaseRoute = createRoute({
       },
     },
     400: { description: "Invalid body or unknown ticket type" },
+    409: { description: "A requested ticket type is sold out" },
   },
 });
 
@@ -101,43 +102,35 @@ tickets.openapi(purchaseRoute, async (c) => {
   const { uid } = c.get("user");
   const db = getFirestore();
 
-  const typeIds = [...new Set(items.map((item) => item.typeId))];
-  const typeDocs = await db.getAll(
-    ...typeIds.map((id) => db.doc(`ticketTypes/${id}`)),
-  );
-
-  const types = new Map<string, TicketType>();
-  for (const doc of typeDocs) {
-    if (!doc.exists) {
-      throw new HTTPException(400, { message: `unknown ticket type: ${doc.id}` });
-    }
-    types.set(doc.id, { id: doc.id, ...(doc.data() as Omit<TicketType, "id">) });
-  }
-
   const ticketRefs = items.map(() => db.collection("tickets").doc());
 
-  const batch = db.batch();
-  items.forEach((item, i) => {
-    const type = types.get(item.typeId)!;
-    batch.set(ticketRefs[i], {
-      uid,
-      typeId: item.typeId,
-      status: "pending",
-      code: randomUUID(),
-      holderName: item.holderName,
-      holderEmail: item.holderEmail,
-      paymentMethod: "stripe",
-      soldBy: null,
-      purchasedAt: FieldValue.serverTimestamp(),
-      days: type.days,
-      isLanParty: type.isLanParty,
-      checkins: {},
-    } satisfies TicketWrite);
+  // One transaction so the capacity check and the tickets that consume it can't interleave
+  const types = await db.runTransaction(async (tx) => {
+    const reserved = await reserveCapacity(tx, items);
+
+    items.forEach((item, i) => {
+      const type = reserved.get(item.typeId)!;
+      tx.set(ticketRefs[i], {
+        uid,
+        typeId: item.typeId,
+        status: "pending",
+        code: randomUUID(),
+        holderName: item.holderName,
+        holderEmail: item.holderEmail,
+        paymentMethod: "stripe",
+        soldBy: null,
+        purchasedAt: FieldValue.serverTimestamp(),
+        days: type.days,
+        isLanParty: type.isLanParty,
+        checkins: {},
+      } satisfies TicketWrite);
+    });
+
+    return reserved;
   });
 
-  await batch.commit();
-
   const stripe = new Stripe(stripeSecretKey.value());
+
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
     line_items: items.map((item) => {
