@@ -2,12 +2,11 @@ import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { initializeApp } from "firebase-admin/app";
 import { getRequestListener } from "@hono/node-server";
 import { onRequest } from "firebase-functions/v2/https";
-import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { Scalar } from "@scalar/hono-api-reference";
 
 import { type Env, requireAuth, requireAdmin } from "./auth";
-import { frontendUrl } from "./config";
+import { corsMiddleware } from "./cors";
 import { bearerAuth } from "./schemas";
 import { stripeSecretKey, stripeWebhook, stripeWebhookSecret } from "./stripe";
 import { ROLES } from "./types";
@@ -27,23 +26,8 @@ const app = new OpenAPIHono<Env>().basePath("/api/v1");
 
 app.use(logger());
 
-const DEV_ORIGINS = ["http://localhost:8080", "http://127.0.0.1:8080"];
-
-const stripSlash = (url: string) => url.replace(/\/+$/, "");
-
 // Ahead of requireAuth: a preflight carries no token, so it must not be authenticated
-app.use(
-  "*",
-  cors({
-    origin: (origin) => {
-      const allowed = [stripSlash(frontendUrl.value()), ...DEV_ORIGINS];
-      return allowed.includes(stripSlash(origin)) ? origin : null;
-    },
-    allowHeaders: ["Authorization", "Content-Type"],
-    allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
-    maxAge: 3600,
-  }),
-);
+app.use("*", corsMiddleware);
 
 app.openAPIRegistry.registerComponent("securitySchemes", "Bearer", {
   type: "http",
