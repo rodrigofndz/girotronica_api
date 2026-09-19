@@ -14,6 +14,7 @@ import { checkin } from "./tickets/checkin";
 import { doorSale } from "./tickets/doorSale";
 import { ticketLookup } from "./tickets/lookup";
 import { ticketQr } from "./tickets/qr";
+import { adminTicketTypes, ticketTypes } from "./tickets/ticketTypes";
 import { tickets } from "./tickets/tickets";
 import { lanParty } from "./users/lanParty";
 import { userLookup } from "./users/lookup";
@@ -60,8 +61,11 @@ app.openapi(
 );
 
 app.route("/stripe/webhook", stripeWebhook);
+app.route("/ticket-types", ticketTypes);
 
 app.use("*", requireAuth);
+
+app.route("/ticket-types", adminTicketTypes);
 
 app.openapi(
   createRoute({
