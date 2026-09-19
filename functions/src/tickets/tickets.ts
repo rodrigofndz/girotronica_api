@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
+import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
 
 import type { Env } from "../auth";
@@ -9,7 +10,7 @@ import { bearerAuth, CheckinsSchema, checkinTimes } from "../schemas";
 import { frontendUrl } from "../config";
 import { stripeSecretKey } from "../stripe";
 import type { Ticket, TicketWrite } from "../types";
-import { reserveCapacity } from "./capacity";
+import { releaseCapacity, reserveCapacity } from "./capacity";
 
 export const tickets = new OpenAPIHono<Env>();
 
@@ -131,23 +132,34 @@ tickets.openapi(purchaseRoute, async (c) => {
 
   const stripe = new Stripe(stripeSecretKey.value());
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    line_items: items.map((item) => {
-      const type = types.get(item.typeId)!;
-      return {
-        price_data: {
-          currency: "eur",
-          unit_amount: type.price,
-          product_data: { name: type.name },
-        },
-        quantity: 1,
-      };
-    }),
-    success_url: `${frontendUrl.value()}/tickets/success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${frontendUrl.value()}/tickets`,
-    metadata: { ticketIds: JSON.stringify(ticketRefs.map((ref) => ref.id)) },
-  });
+  let session: Stripe.Checkout.Session;
+  try {
+    session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      line_items: items.map((item) => {
+        const type = types.get(item.typeId)!;
+        return {
+          price_data: {
+            currency: "eur",
+            unit_amount: type.price,
+            product_data: { name: type.name },
+          },
+          quantity: 1,
+        };
+      }),
+      success_url: `${frontendUrl.value()}/tickets/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${frontendUrl.value()}/tickets`,
+      metadata: { ticketIds: JSON.stringify(ticketRefs.map((ref) => ref.id)) },
+    });
+  } catch (err) {
+    // No checkout means nobody can ever pay for these, so don't let them hold slots
+    await db.runTransaction(async (tx) => {
+      releaseCapacity(tx, items.map((item) => item.typeId));
+      for (const ref of ticketRefs) tx.delete(ref);
+    });
+    console.error("failed to create checkout session", err);
+    throw new HTTPException(502, { message: "could not start checkout" });
+  }
 
   return c.json({ checkoutUrl: session.url }, 200);
 });
