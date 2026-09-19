@@ -1,5 +1,5 @@
 import { getFirestore } from "firebase-admin/firestore";
-import { defineSecret, defineString } from "firebase-functions/params";
+import { defineSecret } from "firebase-functions/params";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
@@ -9,9 +9,6 @@ import type { Ticket, TicketWrite } from "./types";
 
 export const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 export const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
-export const frontendUrl = defineString("FRONTEND_URL", {
-  default: "http://localhost:8080",
-});
 
 export const stripeWebhook = new Hono();
 

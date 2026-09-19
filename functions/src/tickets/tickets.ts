@@ -7,7 +7,8 @@ import Stripe from "stripe";
 
 import type { Env } from "../auth";
 import { bearerAuth, CheckinsSchema, checkinTimes } from "../schemas";
-import { frontendUrl, stripeSecretKey } from "../stripe";
+import { frontendUrl } from "../config";
+import { stripeSecretKey } from "../stripe";
 import type { Ticket, TicketType, TicketWrite } from "../types";
 
 export const tickets = new OpenAPIHono<Env>();
