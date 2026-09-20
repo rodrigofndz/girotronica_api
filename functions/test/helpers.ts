@@ -147,3 +147,21 @@ export const checkoutSession = (ticketIds: string[], extra: Record<string, unkno
   metadata: { ticketIds: JSON.stringify(ticketIds) },
   ...extra,
 });
+
+/** QR responses are binary, so they need their own fetch rather than the JSON one. */
+export async function fetchQr(
+  ticketId: string,
+  token?: string,
+): Promise<{ status: number; contentType: string | null; isPng: boolean; decoded: Buffer }> {
+  const res = await fetch(`${baseUrl}/tickets/${ticketId}/qr`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  const decoded = Buffer.from(await res.arrayBuffer());
+
+  return {
+    status: res.status,
+    contentType: res.headers.get("content-type"),
+    isPng: decoded.subarray(1, 4).toString() === "PNG",
+    decoded,
+  };
+}
