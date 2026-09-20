@@ -124,5 +124,19 @@ stripeWebhook.post("/", async (c) => {
     }
   }
 
+  if (event.type === "checkout.session.expired") {
+    const ticketIds = ticketIdsFromSession(event.data.object as Stripe.Checkout.Session);
+
+    if (ticketIds.length > 0) {
+      const db = getFirestore();
+      await db.runTransaction(async (tx) => {
+        const docs = await tx.getAll(...ticketIds.map((id) => db.doc(`tickets/${id}`)));
+        // Only slots still waiting for payment: a paid ticket must never be voided by an expiry
+        const unpaid = docs.filter((doc) => (doc.data() as Ticket | undefined)?.status === "pending");
+        cancelInTransaction(tx, unpaid);
+      });
+    }
+  }
+
   return c.json({ received: true });
 });
