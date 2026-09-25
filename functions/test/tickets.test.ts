@@ -213,3 +213,26 @@ describe("cancelling", () => {
     expect((await apiFetch("POST", "/tickets/ghost/cancel", { token: admin.token })).status).toBe(404);
   });
 });
+
+describe("LAN party members", () => {
+  it("lists only active LAN party tickets, with holder details", async () => {
+    await seedTicketType("lan", { isLanParty: true, capacity: 10 });
+    await doorSale([oneItem({ typeId: "lan", holderName: "Gamer", holderEmail: "gamer@example.com" })]);
+    await doorSale([oneItem()]); // a normal ticket, not a member
+    await getFirestore().collection("tickets").add({
+      uid: null, typeId: "lan", status: "pending", code: "unpaid-lan",
+      holderName: "Unpaid", holderEmail: "unpaid@example.com", paymentMethod: "stripe",
+      soldBy: null, purchasedAt: new Date(), days: ["2026-11-20"], isLanParty: true, checkins: {},
+    });
+
+    const res = await apiFetch("GET", "/users/lan-party", { token: staff.token });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0]).toMatchObject({ holderName: "Gamer", holderEmail: "gamer@example.com" });
+  });
+
+  it("is closed to attendees", async () => {
+    expect((await apiFetch("GET", "/users/lan-party", { token: attendee.token })).status).toBe(403);
+  });
+});

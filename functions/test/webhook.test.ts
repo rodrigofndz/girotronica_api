@@ -87,6 +87,20 @@ describe("payment confirmation", () => {
     expect(await ticketStatus(ticket.id)).toBe("active");
   });
 
+  it("activates a free order, which has no payment intent", async () => {
+    const ticket = await newTicket("pending");
+
+    await sendStripeEvent(
+      "checkout.session.completed",
+      checkoutSession([ticket.id], { payment_status: "no_payment_required", payment_intent: null }),
+    );
+
+    const stored = (await ticket.get()).data()!;
+    expect(stored.status).toBe("active");
+    expect(stored.paymentIntentId).toBeNull();
+    expect(await mailDocs()).toHaveLength(1);
+  });
+
   it("ignores a session that is still unpaid", async () => {
     const ticket = await newTicket("pending");
 
