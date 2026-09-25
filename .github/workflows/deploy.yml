@@ -1,0 +1,85 @@
+name: Deploy
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # A tag can point anywhere; only ship commits that have been merged to main
+  verify-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME points at a commit that is not on main"
+            exit 1
+          fi
+
+  test:
+    needs: verify-tag
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    # One deploy at a time; never cancel one halfway through
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - run: npm install -g firebase-tools@15
+      - run: npm ci
+        working-directory: functions
+
+      # Non-secret runtime params, read by the function from .env.<project id>
+      - name: Write function params
+        env:
+          FRONTEND_URL: ${{ vars.FRONTEND_URL }}
+          PREVIEW_PROJECTS: ${{ vars.PREVIEW_PROJECTS }}
+        run: |
+          if [ -z "$FRONTEND_URL" ]; then
+            echo "::error::Set the FRONTEND_URL variable on the production environment"
+            exit 1
+          fi
+          {
+            echo "FRONTEND_URL=$FRONTEND_URL"
+            echo "PREVIEW_PROJECTS=$PREVIEW_PROJECTS"
+          } > functions/.env.girotronica-api
+
+      - name: Authenticate to Google Cloud
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          if [ -z "$GCP_SA_KEY" ]; then
+            echo "::error::Set the GCP_SA_KEY secret on the production environment"
+            exit 1
+          fi
+          printf '%s' "$GCP_SA_KEY" > "$RUNNER_TEMP/gcp-key.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/gcp-key.json" >> "$GITHUB_ENV"
+
+      - name: Deploy functions, rules and indexes
+        run: >
+          firebase deploy
+          --only functions,firestore:rules,firestore:indexes
+          --project girotronica-api
+          --non-interactive
+
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/gcp-key.json"
