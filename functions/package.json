@@ -8,8 +8,8 @@
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log",
-    "test": "firebase emulators:exec --only auth,firestore --project girotronica-api \"vitest run\"",
-    "test:watch": "firebase emulators:exec --only auth,firestore --project girotronica-api \"vitest\""
+    "test": "firebase emulators:exec --config ../firebase.test.json --only auth,firestore --project girotronica-api \"vitest run\"",
+    "test:watch": "firebase emulators:exec --config ../firebase.test.json --only auth,firestore --project girotronica-api \"vitest\""
   },
   "engines": {
     "node": "24"
