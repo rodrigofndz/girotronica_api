@@ -27,6 +27,9 @@ export type TicketType = {
   isLanParty: boolean;
   days: string[];          // ISO dates (YYYY-MM-DD) this type grants access to
   sold?: number;           // pending + active tickets; absent on hand-seeded docs
+  // Sale window as UTC ISO date-times; absent or null means open on that side
+  salesStart?: string | null;
+  salesEnd?: string | null;
 };
 
 export type CheckIn = {

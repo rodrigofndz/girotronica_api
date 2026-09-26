@@ -3,9 +3,16 @@ import { HTTPException } from "hono/http-exception";
 
 import type { TicketType } from "../types";
 
+/** Whether a type's sale window is open at `now`; a missing bound leaves that side open. */
+export function isOnSale(type: Pick<TicketType, "salesStart" | "salesEnd">, now = new Date()): boolean {
+  const time = now.getTime();
+  return (!type.salesStart || Date.parse(type.salesStart) <= time)
+    && (!type.salesEnd || time < Date.parse(type.salesEnd));
+}
+
 /**
- * Loads the requested ticket types, refuses the sale if any of them would go over
- * capacity, and reserves the slots by bumping their `sold` counters. Must run inside
+ * Loads the requested ticket types, refuses the sale if any of them is outside its
+ * sale window or would go over capacity, and reserves the slots by bumping their `sold` counters. Must run inside
  * a transaction so two buyers can't take the same last slot.
  */
 export async function reserveCapacity(
@@ -28,6 +35,12 @@ export async function reserveCapacity(
       throw new HTTPException(400, { message: `unknown ticket type: ${doc.id}` });
     }
     types.set(doc.id, { id: doc.id, ...(doc.data() as Omit<TicketType, "id">) });
+  }
+
+  for (const type of types.values()) {
+    if (!isOnSale(type)) {
+      throw new HTTPException(409, { message: `not on sale: ${type.id}` });
+    }
   }
 
   for (const [typeId, count] of wanted) {

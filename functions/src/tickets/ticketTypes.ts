@@ -5,11 +5,19 @@ import { HTTPException } from "hono/http-exception";
 import { requireAdmin, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
 import type { TicketType } from "../types";
+import { isOnSale } from "./capacity";
 
 export const ticketTypes = new OpenAPIHono<Env>();
 export const adminTicketTypes = new OpenAPIHono<Env>();
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be an ISO date (YYYY-MM-DD)");
+
+// Accepts any offset and stores UTC, so comparisons never depend on how it was written
+const saleBound = z.iso
+  .datetime({ offset: true })
+  .transform((value) => new Date(value).toISOString())
+  .nullable()
+  .openapi({ type: "string", format: "date-time", example: "2026-10-31T23:59:59+01:00" });
 
 const TicketTypeSchema = z.object({
   id: z.string(),
@@ -18,16 +26,27 @@ const TicketTypeSchema = z.object({
   capacity: z.int().nonnegative().nullable(), // 0 means not for sale, null unlimited
   isLanParty: z.boolean(),
   days: z.array(isoDate).min(1),
+  salesStart: saleBound.optional().openapi({ description: "When sales open; null or absent means already open" }),
+  salesEnd: saleBound.optional().openapi({ description: "When sales close (exclusive); null or absent means never" }),
   sold: z.int().nonnegative(),
   remaining: z.int().nonnegative().nullable(),
+  onSale: z.boolean().openapi({ description: "Whether the sale window is open now, by the server's clock" }),
 });
 
+const windowInOrder = (type: { salesStart?: string | null; salesEnd?: string | null }) =>
+  !type.salesStart || !type.salesEnd || type.salesStart < type.salesEnd;
+
+const WINDOW_ORDER_MESSAGE = "salesStart must be before salesEnd";
+
 // strict so a misspelled or system-managed field (like `sold`) is an error, not ignored
-const CreateSchema = TicketTypeSchema.omit({ sold: true, remaining: true })
+const BaseCreateSchema = TicketTypeSchema.omit({ sold: true, remaining: true, onSale: true })
   .extend({ id: z.string().regex(/^[a-z0-9-]+$/, "must be lowercase letters, numbers and dashes") })
   .strict();
 
-const UpdateSchema = CreateSchema.omit({ id: true }).partial().strict();
+const CreateSchema = BaseCreateSchema.refine(windowInOrder, { message: WINDOW_ORDER_MESSAGE });
+
+// Only checks the window when both ends are in the patch; the handler checks it against the stored type
+const UpdateSchema = BaseCreateSchema.omit({ id: true }).partial().strict();
 
 const params = z.object({
   id: z.string().min(1).openapi({ param: { name: "id", in: "path" } }),
@@ -42,8 +61,11 @@ function present(id: string, type: Omit<TicketType, "id">) {
     capacity: type.capacity,
     isLanParty: type.isLanParty,
     days: type.days,
+    salesStart: type.salesStart ?? null,
+    salesEnd: type.salesEnd ?? null,
     sold,
     remaining: type.capacity === null ? null : Math.max(type.capacity - sold, 0),
+    onSale: isOnSale(type),
   };
 }
 
@@ -53,7 +75,9 @@ ticketTypes.openapi(
     path: "/",
     tags: ["Ticket types"],
     summary: "List ticket types on sale",
-    description: "Public. Includes how many are left so the site can show what is sold out.",
+    description:
+      "Public. Includes how many are left and whether each type is on sale right now, " +
+      "so the site can show what is sold out, coming soon or closed.",
     responses: {
       200: {
         description: "Ticket types",
@@ -87,7 +111,7 @@ adminTicketTypes.openapi(
         description: "Created",
         content: { "application/json": { schema: TicketTypeSchema } },
       },
-      400: { description: "Invalid body" },
+      400: { description: "Invalid body, or the sale window would end before it starts" },
       403: { description: "Caller is not admin" },
       409: { description: "A ticket type with that id already exists" },
     },
@@ -114,7 +138,8 @@ adminTicketTypes.openapi(
     summary: "Update a ticket type",
     description:
       "Admin only. Capacity cannot go below what is already sold; set it equal to `sold` to stop sales. " +
-      "Changing `days` or `isLanParty` does not affect tickets already issued.",
+      "Changing `days` or `isLanParty` does not affect tickets already issued. " +
+      "Send null for `salesStart` or `salesEnd` to remove that bound.",
     security: bearerAuth,
     middleware: [requireAdmin] as const,
     request: {
@@ -126,7 +151,7 @@ adminTicketTypes.openapi(
         description: "Updated",
         content: { "application/json": { schema: TicketTypeSchema } },
       },
-      400: { description: "Invalid body" },
+      400: { description: "Invalid body, or the sale window would end before it starts" },
       403: { description: "Caller is not admin" },
       404: { description: "No such ticket type" },
       409: { description: "Capacity is below the number already sold" },
@@ -152,8 +177,13 @@ adminTicketTypes.openapi(
         });
       }
 
+      const merged = { ...current, ...patch };
+      if (!windowInOrder(merged)) {
+        throw new HTTPException(400, { message: WINDOW_ORDER_MESSAGE });
+      }
+
       tx.update(ref, patch);
-      return { ...current, ...patch };
+      return merged;
     });
 
     return c.json(present(id, updated), 200);
