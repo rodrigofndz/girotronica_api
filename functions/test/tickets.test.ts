@@ -236,3 +236,21 @@ describe("LAN party members", () => {
     expect((await apiFetch("GET", "/users/lan-party", { token: attendee.token })).status).toBe(403);
   });
 });
+
+describe("email matching", () => {
+  it("stores holder emails in one form and finds them whatever the case", async () => {
+    const sale = await doorSale([oneItem({ holderEmail: "  Joan.Pujol@Example.COM " })]);
+
+    const stored = (await getFirestore().doc(`tickets/${sale.body[0].id}`).get()).data()!;
+    expect(stored.holderEmail).toBe("joan.pujol@example.com");
+
+    const found = await apiFetch("GET", "/tickets/by-email?email=JOAN.PUJOL@example.com", {
+      token: staff.token,
+    });
+    expect(found.body).toHaveLength(1);
+  });
+
+  it("still rejects something that is not an email", async () => {
+    expect((await doorSale([oneItem({ holderEmail: "  not an email  " })])).status).toBe(400);
+  });
+});

@@ -2,7 +2,7 @@ import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { getFirestore } from "firebase-admin/firestore";
 
 import { requireStaff, type Env } from "../auth";
-import { bearerAuth, CheckinsSchema, checkinTimes } from "../schemas";
+import { bearerAuth, CheckinsSchema, checkinTimes, EmailSchema } from "../schemas";
 import { TICKET_STATUSES, type Ticket } from "../types";
 
 export const ticketLookup = new OpenAPIHono<Env>();
@@ -30,7 +30,7 @@ ticketLookup.openapi(
     security: bearerAuth,
     middleware: [requireStaff] as const,
     request: {
-      query: z.object({ email: z.email().openapi({ param: { name: "email", in: "query" } }) }),
+      query: z.object({ email: EmailSchema.openapi({ param: { name: "email", in: "query" } }) }),
     },
     responses: {
       200: {

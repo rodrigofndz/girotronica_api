@@ -6,7 +6,7 @@ import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
 
 import type { Env } from "../auth";
-import { bearerAuth, CheckinsSchema, checkinTimes } from "../schemas";
+import { bearerAuth, CheckinsSchema, checkinTimes, EmailSchema } from "../schemas";
 import { frontendUrl } from "../config";
 import { stripeSecretKey } from "../stripe";
 import type { Ticket, TicketWrite } from "../types";
@@ -67,7 +67,7 @@ const PurchaseSchema = z.object({
       z.object({
         typeId: z.string().min(1),
         holderName: z.string().min(1),
-        holderEmail: z.email(),
+        holderEmail: EmailSchema,
       }),
     )
     .min(1)

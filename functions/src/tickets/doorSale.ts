@@ -5,7 +5,7 @@ import { FieldValue, getFirestore } from "firebase-admin/firestore";
 
 import { requireStaff, type Env } from "../auth";
 import { queueTicketEmails } from "../mail";
-import { bearerAuth } from "../schemas";
+import { bearerAuth, EmailSchema } from "../schemas";
 import { PAYMENT_METHODS, type TicketWrite } from "../types";
 import { reserveCapacity } from "./capacity";
 
@@ -18,7 +18,7 @@ const DoorSaleSchema = z.object({
       z.object({
         typeId: z.string().min(1),
         holderName: z.string().min(1),
-        holderEmail: z.email(),
+        holderEmail: EmailSchema,
       }),
     )
     .min(1)

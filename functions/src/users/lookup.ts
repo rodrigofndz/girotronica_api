@@ -3,7 +3,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
 import { requireStaff, type Env } from "../auth";
-import { bearerAuth, UserProfileSchema } from "../schemas";
+import { bearerAuth, EmailSchema, UserProfileSchema } from "../schemas";
 import type { UserProfile } from "../types";
 
 export const userLookup = new OpenAPIHono<Env>();
@@ -18,7 +18,7 @@ userLookup.openapi(
     security: bearerAuth,
     middleware: [requireStaff] as const,
     request: {
-      query: z.object({ email: z.email().openapi({ param: { name: "email", in: "query" } }) }),
+      query: z.object({ email: EmailSchema.openapi({ param: { name: "email", in: "query" } }) }),
     },
     responses: {
       200: {

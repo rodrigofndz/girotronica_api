@@ -3,6 +3,7 @@ import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { createMiddleware } from "hono/factory";
 import { HTTPException } from "hono/http-exception";
 
+import { normalizeEmail } from "./schemas";
 import type { Role, UserProfile, UserProfileWrite } from "./types";
 
 export type User = { uid: string; email?: string; role: Role };
@@ -27,7 +28,7 @@ export const requireAuth = createMiddleware<Env>(async (c, next) => {
   const snap = await ref.get();
   const profile = snap.data() as UserProfile | undefined;
 
-  const email = decoded.email ?? null;
+  const email = decoded.email ? normalizeEmail(decoded.email) : null;
   const displayName: string | null = decoded.name ?? null;
 
   if (!profile) {
@@ -48,7 +49,7 @@ export const requireAuth = createMiddleware<Env>(async (c, next) => {
 
   c.set("user", {
     uid: decoded.uid,
-    email: decoded.email,
+    email: email ?? undefined,
     role: profile?.role ?? "user",
   });
 

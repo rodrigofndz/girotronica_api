@@ -4,6 +4,18 @@ import { ROLES, type Ticket } from "./types";
 
 export const bearerAuth = [{ Bearer: [] }];
 
+export const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
+/**
+ * Firestore compares strings exactly, so every email is stored and looked up in one form;
+ * otherwise "Joan@x.com" and "joan@x.com" would never match.
+ */
+export const EmailSchema = z
+  .string()
+  .transform(normalizeEmail)
+  .pipe(z.email())
+  .openapi({ format: "email", description: "Case-insensitive; stored lowercase" });
+
 export const UserProfileSchema = z.object({
   uid: z.string(),
   email: z.string().nullable(),

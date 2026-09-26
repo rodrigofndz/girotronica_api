@@ -138,6 +138,18 @@ describe("user lookup", () => {
     expect(res.body.uid).toBe(target.uid);
   });
 
+  it("finds a user whatever the case of the email typed", async () => {
+    const staff = await createUser("staff@example.com", "staff");
+    const target = await createUser("Mixed.Case@Example.com");
+
+    const res = await apiFetch("GET", "/users/by-email?email=MIXED.CASE@example.COM", {
+      token: staff.token,
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ uid: target.uid, email: "mixed.case@example.com" });
+  });
+
   it("reports an unknown email", async () => {
     const staff = await createUser("staff@example.com", "staff");
 
