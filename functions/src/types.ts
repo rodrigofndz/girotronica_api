@@ -13,6 +13,10 @@ export type UserProfile = {
   email: string | null;
   displayName: string | null;
   createdAt: FirebaseFirestore.Timestamp;
+  // Absent on profiles created before suspension existed; treated as not suspended
+  suspended?: boolean;
+  suspendedAt?: FirebaseFirestore.Timestamp | null;
+  suspendedBy?: string | null;
 };
 
 export type TicketType = {

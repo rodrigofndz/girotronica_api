@@ -20,6 +20,7 @@ import { tickets } from "./tickets/tickets";
 import { lanParty } from "./users/lanParty";
 import { userLookup } from "./users/lookup";
 import { staff } from "./users/staff";
+import { suspension } from "./users/suspend";
 
 
 initializeApp();
@@ -99,6 +100,7 @@ app.route("/tickets", ticketCancel);
 app.route("/users/lan-party", lanParty);
 app.route("/users/by-email", userLookup);
 app.route("/users", staff);
+app.route("/users", suspension);
 
 app.openapi(
   createRoute({

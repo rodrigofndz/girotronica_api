@@ -1,6 +1,6 @@
 import { z } from "@hono/zod-openapi";
 
-import { ROLES, type Ticket } from "./types";
+import { ROLES, type Ticket, type UserProfile } from "./types";
 
 export const bearerAuth = [{ Bearer: [] }];
 
@@ -21,7 +21,19 @@ export const UserProfileSchema = z.object({
   email: z.string().nullable(),
   displayName: z.string().nullable(),
   role: z.enum(ROLES),
+  suspended: z.boolean(),
 });
+
+/** The one place a stored profile becomes an API response. */
+export function profileResponse(uid: string, profile: UserProfile) {
+  return {
+    uid,
+    email: profile.email,
+    displayName: profile.displayName,
+    role: profile.role,
+    suspended: profile.suspended ?? false,
+  };
+}
 
 export const CheckinsSchema = z
   .record(z.string(), z.string())

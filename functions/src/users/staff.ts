@@ -3,7 +3,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
 import { requireAdmin, type Env } from "../auth";
-import { bearerAuth, UserProfileSchema } from "../schemas";
+import { bearerAuth, profileResponse, UserProfileSchema } from "../schemas";
 import type { Role, UserProfile, UserProfileWrite } from "../types";
 
 export const staff = new OpenAPIHono<Env>();
@@ -42,7 +42,7 @@ async function setStaffRole(uid: string, role: Exclude<Role, "admin">) {
     return current;
   });
 
-  return { uid, email: profile.email, displayName: profile.displayName, role };
+  return profileResponse(uid, { ...profile, role });
 }
 
 staff.openapi(
@@ -98,10 +98,7 @@ staff.openapi(
       .where("role", "in", ["staff", "admin"] satisfies Role[])
       .get();
 
-    const people = snap.docs.map((doc) => {
-      const { email, displayName, role } = doc.data() as UserProfile;
-      return { uid: doc.id, email, displayName, role };
-    });
+    const people = snap.docs.map((doc) => profileResponse(doc.id, doc.data() as UserProfile));
 
     people.sort(
       (a, b) =>

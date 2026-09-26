@@ -20,13 +20,23 @@ export const requireAuth = createMiddleware<Env>(async (c, next) => {
   let decoded;
   try {
     decoded = await getAuth().verifyIdToken(header.slice(7));
-  } catch {
+  } catch (err) {
+    // Only raised where the token is checked against the account (the emulator does this);
+    // answered like the profile check below so a suspension looks the same everywhere
+    if ((err as { code?: string }).code === "auth/user-disabled") {
+      throw new HTTPException(403, { message: "account suspended" });
+    }
     throw new HTTPException(401, { message: "invalid token" });
   }
 
   const ref = getFirestore().doc(`users/${decoded.uid}`);
   const snap = await ref.get();
   const profile = snap.data() as UserProfile | undefined;
+
+  // Checked on every request, so a suspension bites immediately rather than when the token expires
+  if (profile?.suspended) {
+    throw new HTTPException(403, { message: "account suspended" });
+  }
 
   const email = decoded.email ? normalizeEmail(decoded.email) : null;
   const displayName: string | null = decoded.name ?? null;

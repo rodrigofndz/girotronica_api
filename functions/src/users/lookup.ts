@@ -3,7 +3,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
 import { requireStaff, type Env } from "../auth";
-import { bearerAuth, EmailSchema, UserProfileSchema } from "../schemas";
+import { bearerAuth, EmailSchema, profileResponse, UserProfileSchema } from "../schemas";
 import type { UserProfile } from "../types";
 
 export const userLookup = new OpenAPIHono<Env>();
@@ -44,16 +44,6 @@ userLookup.openapi(
     }
 
     const doc = snap.docs[0];
-    const profile = doc.data() as UserProfile;
-
-    return c.json(
-      {
-        uid: doc.id,
-        email: profile.email,
-        displayName: profile.displayName,
-        role: profile.role,
-      },
-      200,
-    );
+    return c.json(profileResponse(doc.id, doc.data() as UserProfile), 200);
   },
 );
