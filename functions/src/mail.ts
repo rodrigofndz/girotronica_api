@@ -12,11 +12,15 @@ export type TicketEmail = {
   days: string[];
 };
 
+// The holder's name is typed by the buyer, and the buyer also picks where the mail goes
+const escapeHtml = (text: string) =>
+  text.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+
 function html(tickets: TicketEmail[]): string {
   const items = tickets
     .map(
       (t) =>
-        `<li><strong>${t.holderName}</strong> — ${t.days.join(", ")}<br>` +
+        `<li><strong>${escapeHtml(t.holderName)}</strong> — ${t.days.join(", ")}<br>` +
         `<img src="cid:qr-${t.code}" alt="Codi QR" width="200"></li>`,
     )
     .join("");

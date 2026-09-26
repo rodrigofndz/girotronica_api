@@ -86,6 +86,15 @@ describe("ticket emails", () => {
     expect(shared.message.attachments[0]).toMatchObject({ contentType: "image/png", encoding: "base64" });
   });
 
+  it("shows the holder's name as text, never as markup", async () => {
+    await doorSale([oneItem({ holderName: `<a href="https://evil.example">Claim refund</a>` })]);
+
+    const [mail] = await mailDocs();
+
+    expect(mail.message.html).not.toContain("<a ");
+    expect(mail.message.html).toContain("&#60;a href=&#34;https://evil.example&#34;&#62;Claim refund");
+  });
+
   it("still sells the ticket if the email cannot be queued", async () => {
     // A ticket must never be lost because mail failed, so the sale result is what matters here
     const res = await doorSale([oneItem()]);
