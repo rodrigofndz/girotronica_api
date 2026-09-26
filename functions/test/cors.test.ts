@@ -38,10 +38,20 @@ describe("cross-origin access", () => {
     expect(res.headers.get("access-control-max-age")).toBe("3600");
   });
 
-  it("advertises only the methods the API uses", async () => {
-    const res = await preflight(FRONTEND, "DELETE");
+  // Derived from the routes, so a new method can't be forgotten in the CORS list
+  it("allows exactly the methods the API's routes use", async () => {
+    const spec = (await apiFetch("GET", "/openapi.json")).body as {
+      paths: Record<string, Record<string, unknown>>;
+    };
+    const used = new Set(
+      Object.values(spec.paths).flatMap((ops) => Object.keys(ops).map((m) => m.toUpperCase())),
+    );
+    used.add("OPTIONS"); // the preflight itself
 
-    expect(res.headers.get("access-control-allow-methods")).toBe("GET,POST,DELETE,OPTIONS");
+    const res = await preflight(FRONTEND, "PATCH");
+    const allowed = res.headers.get("access-control-allow-methods")!.split(",");
+
+    expect(allowed.sort()).toEqual([...used].sort());
   });
 
   it("allows a hosting preview channel of a configured project", async () => {

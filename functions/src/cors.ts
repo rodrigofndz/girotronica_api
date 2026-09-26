@@ -45,6 +45,6 @@ function isAllowed(origin: string): boolean {
 export const corsMiddleware = cors({
   origin: (origin) => (isAllowed(origin) ? origin : null),
   allowHeaders: ["Authorization", "Content-Type"],
-  allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+  allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   maxAge: 3600,
 });
