@@ -6,6 +6,9 @@ import {
   type TestUser,
 } from "./helpers";
 
+// Online sales ship switched off; these tests cover the code for when it is turned back on
+vi.mock("../src/features", () => ({ ONLINE_SALES: true }));
+
 // Only the checkout call is faked; the real Stripe class (and its webhook signing) stays
 const createSession = vi.hoisted(() => vi.fn());
 
@@ -74,6 +77,16 @@ describe("buying online", () => {
     const res = await buy([item()]);
 
     expect(res.status).toBe(409);
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("refuses outside the type's sale window, without calling Stripe", async () => {
+    await seedTicketType("general", { salesEnd: new Date(Date.now() - 60 * 60 * 1000).toISOString() });
+
+    const res = await buy([item()]);
+
+    expect(res.status).toBe(409);
+    expect(await soldCount("general")).toBe(0);
     expect(createSession).not.toHaveBeenCalled();
   });
 

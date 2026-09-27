@@ -8,7 +8,8 @@ import { Scalar } from "@scalar/hono-api-reference";
 import { type Env, requireAuth, requireAdmin } from "./auth";
 import { corsMiddleware } from "./cors";
 import { bearerAuth } from "./schemas";
-import { stripeSecretKey, stripeWebhook, stripeWebhookSecret } from "./stripe";
+import { ONLINE_SALES } from "./features";
+import { stripeSecrets, stripeWebhook } from "./stripe";
 import { ROLES } from "./types";
 import { checkin } from "./tickets/checkin";
 import { doorSale } from "./tickets/doorSale";
@@ -16,7 +17,7 @@ import { ticketLookup } from "./tickets/lookup";
 import { ticketCancel } from "./tickets/cancel";
 import { ticketQr } from "./tickets/qr";
 import { adminTicketTypes, ticketTypes } from "./tickets/ticketTypes";
-import { tickets } from "./tickets/tickets";
+import { ticketPurchase, tickets } from "./tickets/tickets";
 import { lanParty } from "./users/lanParty";
 import { userLookup } from "./users/lookup";
 import { staff } from "./users/staff";
@@ -62,7 +63,9 @@ app.openapi(
   (c) => c.json({ ok: true }, 200),
 );
 
-app.route("/stripe/webhook", stripeWebhook);
+if (ONLINE_SALES) {
+  app.route("/stripe/webhook", stripeWebhook);
+}
 app.route("/ticket-types", ticketTypes);
 
 app.use("*", requireAuth);
@@ -92,6 +95,9 @@ app.openapi(
 );
 
 app.route("/tickets", tickets);
+if (ONLINE_SALES) {
+  app.route("/tickets", ticketPurchase);
+}
 app.route("/tickets/checkin", checkin);
 app.route("/tickets/door", doorSale);
 app.route("/tickets/by-email", ticketLookup);
@@ -119,6 +125,6 @@ app.openapi(
 );
 
 export const api = onRequest(
-  { region: "europe-west1", maxInstances: 10, secrets: [stripeSecretKey, stripeWebhookSecret] },
+  { region: "europe-west1", maxInstances: 10, secrets: stripeSecrets },
   getRequestListener(app.fetch),
 );

@@ -7,7 +7,6 @@ import {
 
 let admin: TestUser;
 let staff: TestUser;
-let buyer: TestUser;
 
 const HOUR = 60 * 60 * 1000;
 const hoursFromNow = (hours: number) => new Date(Date.now() + hours * HOUR).toISOString();
@@ -30,7 +29,6 @@ beforeEach(async () => {
   await resetEmulators();
   admin = await createUser("admin@example.com", "admin");
   staff = await createUser("staff@example.com", "staff");
-  buyer = await createUser("buyer@example.com");
 });
 
 describe("the sale window in the catalog", () => {
@@ -75,16 +73,6 @@ describe("selling outside the window", () => {
 
     expect(res.status).toBe(409);
     expect(await soldCount("always")).toBe(0);
-  });
-
-  // Refused before Stripe is reached, so no checkout mock is needed here
-  it("applies to online purchases too", async () => {
-    await seedTicketType("early", { salesEnd: hoursFromNow(-1) });
-
-    const res = await apiFetch("POST", "/tickets", { token: buyer.token, body: { items: [item("early")] } });
-
-    expect(res.status).toBe(409);
-    expect(await soldCount("early")).toBe(0);
   });
 
   it("sells inside the window", async () => {

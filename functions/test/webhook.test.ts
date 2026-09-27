@@ -1,10 +1,13 @@
 import { getFirestore } from "firebase-admin/firestore";
-import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   apiFetch, checkoutSession, mailDocs, resetEmulators, seedTicketType, sendStripeEvent,
   soldCount, startApi, stopApi, ticketStatus,
 } from "./helpers";
+
+// Online sales ship switched off; these tests cover the code for when it is turned back on
+vi.mock("../src/features", () => ({ ONLINE_SALES: true }));
 
 const newTicket = (status: string, extra: Record<string, unknown> = {}) =>
   getFirestore().collection("tickets").add({

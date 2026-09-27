@@ -14,6 +14,9 @@ import { releaseCapacity, reserveCapacity } from "./capacity";
 
 export const tickets = new OpenAPIHono<Env>();
 
+/** Online purchase; mounted only while online sales are on. */
+export const ticketPurchase = new OpenAPIHono<Env>();
+
 const OwnTicketSchema = z.object({
   id: z.string(),
   typeId: z.string(),
@@ -98,7 +101,7 @@ const purchaseRoute = createRoute({
   },
 });
 
-tickets.openapi(purchaseRoute, async (c) => {
+ticketPurchase.openapi(purchaseRoute, async (c) => {
   const { items } = c.req.valid("json");
   const { uid } = c.get("user");
   const db = getFirestore();
@@ -130,7 +133,7 @@ tickets.openapi(purchaseRoute, async (c) => {
     return reserved;
   });
 
-  const stripe = new Stripe(stripeSecretKey.value());
+  const stripe = new Stripe(stripeSecretKey());
 
   let session: Stripe.Checkout.Session;
   try {

@@ -4,12 +4,27 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
 
+import { ONLINE_SALES } from "./features";
 import { queueTicketEmails } from "./mail";
 import { cancelInTransaction } from "./tickets/cancel";
 import type { Ticket, TicketWrite } from "./types";
 
-export const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
-export const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
+// Declared only while online sales are on: the deploy fails if a declared secret
+// is missing from Secret Manager, even when no function binds it
+const secrets = ONLINE_SALES
+  ? { key: defineSecret("STRIPE_SECRET_KEY"), webhook: defineSecret("STRIPE_WEBHOOK_SECRET") }
+  : null;
+
+/** What the function must bind; empty while online sales are off. */
+export const stripeSecrets = secrets ? [secrets.key, secrets.webhook] : [];
+
+function secretValue(which: keyof NonNullable<typeof secrets>): string {
+  if (!secrets) throw new Error("online sales are off, so Stripe is not configured");
+  return secrets[which].value();
+}
+
+export const stripeSecretKey = () => secretValue("key");
+export const stripeWebhookSecret = () => secretValue("webhook");
 
 export const stripeWebhook = new Hono();
 
@@ -34,11 +49,11 @@ stripeWebhook.post("/", async (c) => {
   }
 
   const body = await c.req.text();
-  const stripe = new Stripe(stripeSecretKey.value());
+  const stripe = new Stripe(stripeSecretKey());
 
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(body, signature, stripeWebhookSecret.value());
+    event = stripe.webhooks.constructEvent(body, signature, stripeWebhookSecret());
   } catch {
     throw new HTTPException(400, { message: "invalid signature" });
   }
