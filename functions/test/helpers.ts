@@ -111,16 +111,28 @@ export const soldCount = async (typeId: string): Promise<number> =>
 export const ticketStatus = async (id: string): Promise<string | undefined> =>
   (await getFirestore().doc(`tickets/${id}`).get()).data()?.status;
 
+/** Audit entries in the order they were written, optionally only one action's. */
+export async function auditEntries(action?: string): Promise<any[]> {
+  let query: FirebaseFirestore.Query = getFirestore().collection("auditLog");
+  if (action) query = query.where("action", "==", action);
+  const snap = await query.orderBy("at").get();
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
 export const mailDocs = async (): Promise<any[]> =>
   (await getFirestore().collection("mail").get()).docs.map((d) => d.data());
 
-/** Posts a Stripe event with a valid signature for the test webhook secret. */
+/**
+ * Posts a Stripe event with a valid signature for the test webhook secret.
+ * Pass the id of an earlier event to replay it, the way Stripe retries a delivery.
+ */
 export async function sendStripeEvent(
   type: string,
   object: Record<string, unknown>,
-): Promise<{ status: number }> {
+  id = `evt_${Math.random().toString(36).slice(2)}`,
+): Promise<{ status: number; id: string }> {
   const payload = JSON.stringify({
-    id: `evt_${Math.random().toString(36).slice(2)}`,
+    id,
     object: "event",
     type,
     data: { object },
@@ -138,7 +150,7 @@ export async function sendStripeEvent(
     body: payload,
   });
 
-  return { status: res.status };
+  return { status: res.status, id };
 }
 
 export const checkoutSession = (ticketIds: string[], extra: Record<string, unknown> = {}) => ({
