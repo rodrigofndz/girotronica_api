@@ -5,6 +5,7 @@ import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
 
+import { audit, auditedAs } from "../audit/audit";
 import type { Env } from "../auth";
 import { bearerAuth, CheckinsSchema, checkinTimes, EmailSchema } from "../schemas";
 import { frontendUrl } from "../config";
@@ -86,6 +87,7 @@ const purchaseRoute = createRoute({
     "Creates the tickets as pending and returns a Stripe Checkout URL. " +
     "The tickets become active when Stripe confirms payment through the webhook.",
   security: bearerAuth,
+  ...auditedAs("ticket.purchase", "ticket.checkoutFailed"),
   request: {
     body: { required: true, content: { "application/json": { schema: PurchaseSchema } } },
   },
@@ -103,7 +105,8 @@ const purchaseRoute = createRoute({
 
 ticketPurchase.openapi(purchaseRoute, async (c) => {
   const { items } = c.req.valid("json");
-  const { uid } = c.get("user");
+  const buyer = c.get("user");
+  const { uid } = buyer;
   const db = getFirestore();
 
   const ticketRefs = items.map(() => db.collection("tickets").doc());
@@ -128,6 +131,12 @@ ticketPurchase.openapi(purchaseRoute, async (c) => {
         isLanParty: type.isLanParty,
         checkins: {},
       } satisfies TicketWrite);
+      audit(tx, {
+        actor: buyer,
+        action: "ticket.purchase",
+        target: { id: ticketRefs[i].id, label: item.holderName },
+        details: { typeId: item.typeId, price: type.price },
+      });
     });
 
     return reserved;
@@ -158,7 +167,15 @@ ticketPurchase.openapi(purchaseRoute, async (c) => {
     // No checkout means nobody can ever pay for these, so don't let them hold slots
     await db.runTransaction(async (tx) => {
       releaseCapacity(tx, items.map((item) => item.typeId));
-      for (const ref of ticketRefs) tx.delete(ref);
+      ticketRefs.forEach((ref, i) => {
+        tx.delete(ref);
+        audit(tx, {
+          actor: buyer,
+          action: "ticket.checkoutFailed",
+          target: { id: ref.id, label: items[i].holderName },
+          details: {},
+        });
+      });
     });
     console.error("failed to create checkout session", err);
     throw new HTTPException(502, { message: "could not start checkout" });

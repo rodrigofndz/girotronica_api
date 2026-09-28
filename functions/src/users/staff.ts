@@ -2,7 +2,8 @@ import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
-import { requireAdmin, type Env } from "../auth";
+import { audit, auditedAs } from "../audit/audit";
+import { requireAdmin, type Env, type User } from "../auth";
 import { bearerAuth, profileResponse, UserProfileSchema } from "../schemas";
 import type { Role, UserProfile, UserProfileWrite } from "../types";
 
@@ -22,7 +23,7 @@ const responses = {
   409: { description: "Target is an admin; admin roles can't be changed through the API" },
 } as const;
 
-async function setStaffRole(uid: string, role: Exclude<Role, "admin">) {
+async function setStaffRole(actor: User, uid: string, role: Exclude<Role, "admin">) {
   const db = getFirestore();
   const ref = db.doc(`users/${uid}`);
 
@@ -38,6 +39,12 @@ async function setStaffRole(uid: string, role: Exclude<Role, "admin">) {
     }
     if (current.role !== role) {
       tx.update(ref, { role } satisfies Partial<UserProfileWrite>);
+      audit(tx, {
+        actor,
+        action: role === "staff" ? "user.promote" : "user.demote",
+        target: { id: uid, label: current.email },
+        details: {},
+      });
     }
     return current;
   });
@@ -53,11 +60,12 @@ staff.openapi(
     summary: "Promote a user to staff",
     description: "Admin only. Takes effect on the user's next request.",
     security: bearerAuth,
+    ...auditedAs("user.promote"),
     middleware: [requireAdmin] as const,
     request: { params },
     responses,
   }),
-  async (c) => c.json(await setStaffRole(c.req.valid("param").uid, "staff"), 200),
+  async (c) => c.json(await setStaffRole(c.get("user"), c.req.valid("param").uid, "staff"), 200),
 );
 
 staff.openapi(
@@ -68,11 +76,12 @@ staff.openapi(
     summary: "Demote a staff member back to user",
     description: "Admin only. Takes effect on the user's next request.",
     security: bearerAuth,
+    ...auditedAs("user.demote"),
     middleware: [requireAdmin] as const,
     request: { params },
     responses,
   }),
-  async (c) => c.json(await setStaffRole(c.req.valid("param").uid, "user"), 200),
+  async (c) => c.json(await setStaffRole(c.get("user"), c.req.valid("param").uid, "user"), 200),
 );
 
 staff.openapi(

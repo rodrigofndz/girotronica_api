@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 
+import { audit, auditedAs } from "../audit/audit";
 import { requireStaff, type Env } from "../auth";
 import { queueTicketEmails } from "../mail";
 import { bearerAuth, EmailSchema } from "../schemas";
@@ -41,6 +42,7 @@ const doorSaleRoute = createRoute({
     "Staff or admin. Tickets are created active with no account attached; " +
     "`soldBy` and `paymentMethod` are recorded for till reconciliation.",
   security: bearerAuth,
+  ...auditedAs("ticket.doorSale"),
   middleware: [requireStaff] as const,
   request: {
     body: { required: true, content: { "application/json": { schema: DoorSaleSchema } } },
@@ -58,7 +60,8 @@ const doorSaleRoute = createRoute({
 
 doorSale.openapi(doorSaleRoute, async (c) => {
   const { paymentMethod, items } = c.req.valid("json");
-  const { uid: soldBy } = c.get("user");
+  const seller = c.get("user");
+  const soldBy = seller.uid;
   const db = getFirestore();
 
   const ticketRefs = items.map(() => db.collection("tickets").doc());
@@ -84,6 +87,12 @@ doorSale.openapi(doorSaleRoute, async (c) => {
         isLanParty: type.isLanParty,
         checkins: {},
       } satisfies TicketWrite);
+      audit(tx, {
+        actor: seller,
+        action: "ticket.doorSale",
+        target: { id: ticketRefs[i].id, label: item.holderName },
+        details: { typeId: item.typeId, price: type.price, paymentMethod },
+      });
     });
 
     return reserved;

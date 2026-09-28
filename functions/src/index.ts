@@ -5,6 +5,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import { logger } from "hono/logger";
 import { Scalar } from "@scalar/hono-api-reference";
 
+import { auditLog } from "./audit/routes";
 import { type Env, requireAuth, requireAdmin } from "./auth";
 import { corsMiddleware } from "./cors";
 import { bearerAuth } from "./schemas";
@@ -107,6 +108,7 @@ app.route("/users/lan-party", lanParty);
 app.route("/users/by-email", userLookup);
 app.route("/users", staff);
 app.route("/users", suspension);
+app.route("/audit", auditLog);
 
 app.openapi(
   createRoute({

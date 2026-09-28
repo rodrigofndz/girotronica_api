@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
 
+import { audit, AUDIT_COLLECTION, STRIPE_ACTOR } from "./audit/audit";
 import { ONLINE_SALES } from "./features";
 import { queueTicketEmails } from "./mail";
 import { cancelInTransaction } from "./tickets/cancel";
@@ -84,6 +85,12 @@ stripeWebhook.post("/", async (c) => {
                 status: "active",
                 paymentIntentId,
               } satisfies Partial<TicketWrite>);
+              audit(tx, {
+                actor: STRIPE_ACTOR,
+                action: "ticket.paid",
+                target: { id: doc.id, label: ticket.holderName },
+                details: { stripeEventId: event.id, paymentIntentId },
+              });
               justActivated.push(ticket);
             }
           }
@@ -113,26 +120,55 @@ stripeWebhook.post("/", async (c) => {
   if (event.type === "charge.refunded") {
     const charge = event.data.object as Stripe.Charge;
 
-    // Partial refunds can't say which ticket was refunded, so they're left to an admin
-    if (charge.amount_refunded < charge.amount) {
-      console.warn(`partial refund on ${charge.id}; cancel the tickets by hand if needed`);
-    } else {
-      const paymentIntentId =
-        typeof charge.payment_intent === "string"
-          ? charge.payment_intent
-          : (charge.payment_intent?.id ?? null);
+    const paymentIntentId =
+      typeof charge.payment_intent === "string"
+        ? charge.payment_intent
+        : (charge.payment_intent?.id ?? null);
 
-      if (paymentIntentId) {
-        const db = getFirestore();
-        const snap = await db
-          .collection("tickets")
-          .where("paymentIntentId", "==", paymentIntentId)
-          .get();
+    if (paymentIntentId) {
+      const db = getFirestore();
+      const snap = await db
+        .collection("tickets")
+        .where("paymentIntentId", "==", paymentIntentId)
+        .get();
 
-        if (!snap.empty) {
+      if (!snap.empty) {
+        // Partial refunds can't say which ticket was refunded, so they're left to an admin
+        if (charge.amount_refunded < charge.amount) {
+          console.warn(`partial refund on ${charge.id}; cancel the tickets by hand if needed`);
+
+          // Nothing on the ticket changes, so a fixed entry id is what stops a Stripe retry
+          // from logging it twice
+          const entryIds = snap.docs.map((doc) => `stripe-${event.id}-${doc.id}`);
+          await db.runTransaction(async (tx) => {
+            const existing = await tx.getAll(...entryIds.map((id) => db.doc(`${AUDIT_COLLECTION}/${id}`)));
+            snap.docs.forEach((doc, i) => {
+              if (existing[i].exists) return;
+              audit(tx, {
+                actor: STRIPE_ACTOR,
+                action: "ticket.partiallyRefunded",
+                target: { id: doc.id, label: (doc.data() as Ticket).holderName },
+                details: {
+                  stripeEventId: event.id,
+                  chargeId: charge.id,
+                  amount: charge.amount,
+                  amountRefunded: charge.amount_refunded,
+                },
+                id: entryIds[i],
+              });
+            });
+          });
+        } else {
           await db.runTransaction(async (tx) => {
             const docs = await tx.getAll(...snap.docs.map((d) => d.ref));
-            cancelInTransaction(tx, docs);
+            for (const { id, ticket } of cancelInTransaction(tx, docs)) {
+              audit(tx, {
+                actor: STRIPE_ACTOR,
+                action: "ticket.refunded",
+                target: { id, label: ticket.holderName },
+                details: { stripeEventId: event.id, chargeId: charge.id, previousStatus: ticket.status },
+              });
+            }
           });
         }
       }
@@ -148,7 +184,14 @@ stripeWebhook.post("/", async (c) => {
         const docs = await tx.getAll(...ticketIds.map((id) => db.doc(`tickets/${id}`)));
         // Only slots still waiting for payment: a paid ticket must never be voided by an expiry
         const unpaid = docs.filter((doc) => (doc.data() as Ticket | undefined)?.status === "pending");
-        cancelInTransaction(tx, unpaid);
+        for (const { id, ticket } of cancelInTransaction(tx, unpaid)) {
+          audit(tx, {
+            actor: STRIPE_ACTOR,
+            action: "ticket.expired",
+            target: { id, label: ticket.holderName },
+            details: { stripeEventId: event.id },
+          });
+        }
       });
     }
   }

@@ -3,6 +3,7 @@ import { getAuth } from "firebase-admin/auth";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
+import { audit, auditedAs } from "../audit/audit";
 import { requireStaff, type Env, type User } from "../auth";
 import { bearerAuth, profileResponse, UserProfileSchema } from "../schemas";
 import type { UserProfile, UserProfileWrite } from "../types";
@@ -55,6 +56,12 @@ async function setSuspended(actor: User, uid: string, suspended: boolean) {
           ? { suspended: true, suspendedAt: FieldValue.serverTimestamp(), suspendedBy: actor.uid }
           : { suspended: false, suspendedAt: null, suspendedBy: null }) satisfies Partial<UserProfileWrite>,
       );
+      audit(tx, {
+        actor,
+        action: suspended ? "user.suspend" : "user.reactivate",
+        target: { id: uid, label: current.email },
+        details: {},
+      });
     }
     return { ...current, suspended };
   });
@@ -85,6 +92,7 @@ suspension.openapi(
       "Staff or admin. Blocks the account from the API immediately and disables its sign-in. " +
       "Tickets already issued stay valid unless an admin cancels them.",
     security: bearerAuth,
+    ...auditedAs("user.suspend"),
     middleware: [requireStaff] as const,
     request: { params },
     responses,
@@ -100,6 +108,7 @@ suspension.openapi(
     summary: "Reactivate a suspended account",
     description: "Staff or admin, with the same rules as suspending.",
     security: bearerAuth,
+    ...auditedAs("user.reactivate"),
     middleware: [requireStaff] as const,
     request: { params },
     responses,

@@ -2,12 +2,15 @@ import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
+import { audit, auditedAs } from "../audit/audit";
 import { requireAdmin, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
 import type { TicketType } from "../types";
 import { isOnSale } from "./capacity";
 
 export const ticketTypes = new OpenAPIHono<Env>();
+
+const ALREADY_EXISTS = 6;
 export const adminTicketTypes = new OpenAPIHono<Env>();
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be an ISO date (YYYY-MM-DD)");
@@ -102,6 +105,7 @@ adminTicketTypes.openapi(
     summary: "Create a ticket type",
     description: "Admin only. `sold` is maintained by the API and cannot be set here.",
     security: bearerAuth,
+    ...auditedAs("ticketType.create"),
     middleware: [requireAdmin] as const,
     request: {
       body: { required: true, content: { "application/json": { schema: CreateSchema } } },
@@ -118,12 +122,24 @@ adminTicketTypes.openapi(
   }),
   async (c) => {
     const { id, ...type } = c.req.valid("json");
-    const ref = getFirestore().doc(`ticketTypes/${id}`);
+    const db = getFirestore();
+    const batch = db.batch();
+
+    batch.create(db.doc(`ticketTypes/${id}`), { ...type, sold: 0 });
+    audit(batch, {
+      actor: c.get("user"),
+      action: "ticketType.create",
+      target: { id, label: type.name },
+      details: { fields: type },
+    });
 
     try {
-      await ref.create({ ...type, sold: 0 });
-    } catch {
-      throw new HTTPException(409, { message: `ticket type already exists: ${id}` });
+      await batch.commit();
+    } catch (err) {
+      if ((err as { code?: number }).code === ALREADY_EXISTS) {
+        throw new HTTPException(409, { message: `ticket type already exists: ${id}` });
+      }
+      throw err;
     }
 
     return c.json(present(id, { ...type, sold: 0 }), 200);
@@ -141,6 +157,7 @@ adminTicketTypes.openapi(
       "Changing `days` or `isLanParty` does not affect tickets already issued. " +
       "Send null for `salesStart` or `salesEnd` to remove that bound.",
     security: bearerAuth,
+    ...auditedAs("ticketType.update"),
     middleware: [requireAdmin] as const,
     request: {
       params,
@@ -183,6 +200,22 @@ adminTicketTypes.openapi(
       }
 
       tx.update(ref, patch);
+
+      // A field sent with the value it already had isn't a change worth recording
+      const changes = Object.fromEntries(
+        Object.entries(patch)
+          .map(([field, to]) => [field, { from: current[field as keyof typeof current] ?? null, to }] as const)
+          .filter(([, { from, to }]) => JSON.stringify(from) !== JSON.stringify(to)),
+      );
+      if (Object.keys(changes).length > 0) {
+        audit(tx, {
+          actor: c.get("user"),
+          action: "ticketType.update",
+          target: { id, label: merged.name },
+          details: { changes },
+        });
+      }
+
       return merged;
     });
 
@@ -198,6 +231,7 @@ adminTicketTypes.openapi(
     summary: "Delete a ticket type",
     description: "Admin only. Refused once tickets exist for it, since they reference it.",
     security: bearerAuth,
+    ...auditedAs("ticketType.delete"),
     middleware: [requireAdmin] as const,
     request: { params },
     responses: {
@@ -224,6 +258,12 @@ adminTicketTypes.openapi(
         });
       }
       tx.delete(ref);
+      audit(tx, {
+        actor: c.get("user"),
+        action: "ticketType.delete",
+        target: { id, label: current.name },
+        details: {},
+      });
     });
 
     return c.json({ ok: true }, 200);
