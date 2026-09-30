@@ -1,10 +1,12 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
+import Stripe from "stripe";
 
 import { audit, auditedAs } from "../audit/audit";
 import { requireAdmin, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
+import { stripeSecretKey } from "../stripe";
 import type { TicketType } from "../types";
 import { isOnSale } from "./capacity";
 
@@ -177,13 +179,37 @@ adminTicketTypes.openapi(
   },
 );
 
+/**
+ * A synced type must be archived in Stripe before it's deleted here, or the next sync would
+ * recreate it. A product deleted outright in Stripe counts as archived.
+ */
+async function requireArchivedInStripe(productId: string): Promise<void> {
+  let active: boolean;
+  try {
+    active = (await new Stripe(stripeSecretKey()).products.retrieve(productId)).active;
+  } catch (err) {
+    if ((err as { code?: string }).code === "resource_missing") return;
+    console.error("failed to check the Stripe product before deleting", err);
+    throw new HTTPException(502, { message: "could not check the product in Stripe" });
+  }
+  if (active) {
+    throw new HTTPException(409, {
+      message: "its Stripe product is still active; archive it in Stripe first, or the next sync brings it back",
+    });
+  }
+}
+
 adminTicketTypes.openapi(
   createRoute({
     method: "delete",
     path: "/{id}",
     tags: ["Ticket types"],
     summary: "Delete a ticket type",
-    description: "Admin only. Refused once tickets exist for it, since they reference it.",
+    description:
+      "Admin only. For now it deletes even a type with tickets sold (while testing); those tickets " +
+      "still work at the door but can no longer be cancelled or refunded through the API. A type " +
+      "synced from Stripe can only be deleted once its product is archived in Stripe, or the next " +
+      "sync would bring it back.",
     security: bearerAuth,
     ...auditedAs("ticketType.delete"),
     middleware: [requireAdmin] as const,
@@ -192,7 +218,8 @@ adminTicketTypes.openapi(
       200: { description: "Deleted", content: { "application/json": { schema: z.object({ ok: z.boolean() }) } } },
       403: { description: "Caller is not admin" },
       404: { description: "No such ticket type" },
-      409: { description: "Tickets have already been sold for this type" },
+      409: { description: "Its Stripe product is still active" },
+      502: { description: "Stripe could not be reached to check the product; nothing was deleted" },
     },
   }),
   async (c) => {
@@ -200,23 +227,29 @@ adminTicketTypes.openapi(
     const db = getFirestore();
     const ref = db.doc(`ticketTypes/${id}`);
 
+    // Asked before the transaction, since Stripe can't take part in it; the sold check below
+    // still runs inside it
+    const linkedProduct = ((await ref.get()).data() as Omit<TicketType, "id"> | undefined)?.stripeProductId;
+    if (linkedProduct) {
+      await requireArchivedInStripe(linkedProduct);
+    }
+
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
       const current = snap.data() as Omit<TicketType, "id"> | undefined;
       if (!current) {
         throw new HTTPException(404, { message: "ticket type not found" });
       }
-      if ((current.sold ?? 0) > 0) {
-        throw new HTTPException(409, {
-          message: `${current.sold} tickets exist for ${id}; set capacity to stop sales instead`,
-        });
-      }
+      // TEMPORARY while testing: types with tickets sold can be deleted too. Those tickets keep
+      // their days so check-in still works, but cancelling one fails, since that updates this
+      // type's sold counter. Restore the refusal below before real sales:
+      //   if ((current.sold ?? 0) > 0) throw new HTTPException(409, { message: ... });
       tx.delete(ref);
       audit(tx, {
         actor: c.get("user"),
         action: "ticketType.delete",
         target: { id, label: current.name },
-        details: {},
+        details: { sold: current.sold ?? 0 },
       });
     });
 

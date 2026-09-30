@@ -39,8 +39,8 @@ export const AUDIT_ACTIONS = {
     details: z.object({ changes: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })) }),
   },
   "ticketType.delete": {
-    description: "Ticket type deleted",
-    details: z.object({}),
+    description: "Ticket type deleted; `sold` is how many tickets it had then",
+    details: z.object({ sold: z.int().optional() }),
   },
   "ticket.doorSale": {
     description: "Sold at the door",
