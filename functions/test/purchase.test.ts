@@ -63,6 +63,15 @@ describe("buying online", () => {
     expect(session.line_items[0].price_data).toMatchObject({ currency: "eur", unit_amount: 900 });
   });
 
+  it("charges a type synced from Stripe at Stripe's own price", async () => {
+    await seedTicketType("pack", { capacity: 10, price: 1300, stripeProductId: "prod_pack", stripePriceId: "price_pack" });
+
+    await buy([item({ typeId: "pack" })]);
+
+    const [session] = createSession.mock.calls[0];
+    expect(session.line_items).toEqual([{ price: "price_pack", quantity: 1 }]);
+  });
+
   it("links the checkout to exactly the tickets it created", async () => {
     await buy([item(), item()]);
 

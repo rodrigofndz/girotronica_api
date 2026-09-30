@@ -40,30 +40,17 @@ beforeEach(async () => {
 });
 
 describe("what gets recorded", () => {
-  it("records who created a ticket type and with what", async () => {
-    await apiFetch("POST", "/ticket-types", {
-      token: admin.token,
-      body: { id: "pack", name: "Pack", price: 1300, capacity: null, isLanParty: false, days: ["2026-11-20"] },
-    });
-
-    const [entry] = await auditEntries("ticketType.create");
-
-    expect(entry).toMatchObject({
-      targetType: "ticketType", targetId: "pack", targetLabel: "Pack",
-      actorUid: admin.uid, actorEmail: "admin@example.com", actorRole: "admin",
-      details: { fields: { name: "Pack", price: 1300 } },
-    });
-    expect(entry.at).toBeTruthy();
-  });
-
   it("records only the fields an edit actually changed, and nothing for a no-op edit", async () => {
-    await apiFetch("PATCH", "/ticket-types/general", { token: admin.token, body: { price: 900, name: "general" } });
-    await apiFetch("PATCH", "/ticket-types/general", { token: admin.token, body: { price: 900 } });
+    await apiFetch("PATCH", "/ticket-types/general", { token: admin.token, body: { capacity: 3, name: "general" } });
+    await apiFetch("PATCH", "/ticket-types/general", { token: admin.token, body: { capacity: 3 } });
 
     const entries = await auditEntries("ticketType.update");
 
     expect(entries).toHaveLength(1);
-    expect(entries[0].details).toEqual({ changes: { price: { from: 700, to: 900 } } });
+    expect(entries[0]).toMatchObject({
+      targetId: "general", actorUid: admin.uid, actorEmail: "admin@example.com", actorRole: "admin",
+      details: { changes: { capacity: { from: null, to: 3 } } },
+    });
   });
 
   it("keeps a deleted type's name so the entry still reads well", async () => {
@@ -150,10 +137,7 @@ describe("what gets recorded", () => {
 
     await doorSale(["Anna"], "full");
     await apiFetch("POST", `/users/${admin.uid}/suspend`, { token: staff.token });
-    await apiFetch("POST", "/ticket-types", {
-      token: admin.token,
-      body: { id: "general", name: "Dup", price: 1, capacity: null, isLanParty: false, days: ["2026-11-20"] },
-    });
+    await apiFetch("PATCH", "/ticket-types/general", { token: admin.token, body: { price: 1 } });
 
     expect(await auditEntries()).toEqual([]);
   });

@@ -83,16 +83,13 @@ describe("selling outside the window", () => {
 });
 
 describe("setting the window", () => {
-  const base = {
-    id: "early", name: "Early bird", price: 1300, capacity: null,
-    isLanParty: false, days: ["2026-11-20", "2026-11-21", "2026-11-22"],
-  };
+  const setWindow = (body: Record<string, unknown>) =>
+    apiFetch("PATCH", "/ticket-types/early", { token: admin.token, body });
+
+  beforeEach(() => seedTicketType("early"));
 
   it("accepts any timezone offset and stores UTC", async () => {
-    const res = await apiFetch("POST", "/ticket-types", {
-      token: admin.token,
-      body: { ...base, salesEnd: "2026-10-31T23:59:59+01:00" },
-    });
+    const res = await setWindow({ salesEnd: "2026-10-31T23:59:59+01:00" });
 
     expect(res.status).toBe(200);
     expect(res.body.salesEnd).toBe("2026-10-31T22:59:59.000Z");
@@ -100,19 +97,13 @@ describe("setting the window", () => {
   });
 
   it("refuses a date without a timezone, which would be ambiguous", async () => {
-    const res = await apiFetch("POST", "/ticket-types", {
-      token: admin.token,
-      body: { ...base, salesEnd: "2026-10-31T23:59:59" },
-    });
+    const res = await setWindow({ salesEnd: "2026-10-31T23:59:59" });
 
     expect(res.status).toBe(400);
   });
 
   it("refuses a window that ends before it starts", async () => {
-    const res = await apiFetch("POST", "/ticket-types", {
-      token: admin.token,
-      body: { ...base, salesStart: "2026-11-01T00:00:00Z", salesEnd: "2026-10-01T00:00:00Z" },
-    });
+    const res = await setWindow({ salesStart: "2026-11-01T00:00:00Z", salesEnd: "2026-10-01T00:00:00Z" });
 
     expect(res.status).toBe(400);
   });

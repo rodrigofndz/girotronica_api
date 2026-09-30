@@ -39,12 +39,13 @@ describe("with online sales switched off, as shipped", () => {
     expect((await apiFetch("GET", "/tickets", { token: buyer.token })).status).toBe(200);
   });
 
-  // Any declared secret must exist in Secret Manager or the deploy fails, bound or not
-  it("neither declares nor binds the Stripe secrets, so deploying needs no Stripe setup", () => {
+  // Any declared secret must exist in Secret Manager or the deploy fails, bound or not.
+  // The API key is still needed: the catalogue sync reads Stripe while online sales are off.
+  it("needs only the Stripe API key, not the webhook secret", () => {
     const secretNames = declaredParams.map((param) => param.name);
 
-    expect(secretNames).not.toContain("STRIPE_SECRET_KEY");
+    expect(secretNames).toContain("STRIPE_SECRET_KEY");
     expect(secretNames).not.toContain("STRIPE_WEBHOOK_SECRET");
-    expect(api.__endpoint.secretEnvironmentVariables ?? []).toEqual([]);
+    expect(api.__endpoint.secretEnvironmentVariables?.map((s) => s.key)).toEqual(["STRIPE_SECRET_KEY"]);
   });
 });

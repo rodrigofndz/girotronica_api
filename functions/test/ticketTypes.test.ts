@@ -48,48 +48,32 @@ describe("the public catalog", () => {
   });
 });
 
-describe("creating a type", () => {
-  it("starts the sold counter at zero", async () => {
-    const res = await apiFetch("POST", "/ticket-types", { token: admin.token, body: valid });
-
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ id: "general", sold: 0, remaining: 2 });
+describe("what the web may change", () => {
+  beforeEach(async () => {
+    await seedTicketType("general", { capacity: 5, sold: 2 });
   });
 
-  it("refuses a duplicate id", async () => {
-    await apiFetch("POST", "/ticket-types", { token: admin.token, body: valid });
-
+  // Types come from the Stripe sync, which is the only place a price is set
+  it("can't create a type", async () => {
     const res = await apiFetch("POST", "/ticket-types", { token: admin.token, body: valid });
 
-    expect(res.status).toBe(409);
-  });
-
-  it("refuses to let the sold counter be set by hand", async () => {
-    const res = await apiFetch("POST", "/ticket-types", {
-      token: admin.token,
-      body: { ...valid, sold: 99 },
-    });
-
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
   });
 
   it.each([
-    ["an id with spaces", { id: "has spaces" }],
-    ["a price that is not whole cents", { price: 9.5 }],
-    ["a negative price", { price: -1 }],
+    ["the price, which only changes in Stripe", { price: 1500 }],
+    ["the sold counter", { sold: 99 }],
+    ["the Stripe link", { stripeProductId: "prod_other" }],
     ["a day that is not an ISO date", { days: ["20-11-2026"] }],
     ["no days at all", { days: [] }],
-  ])("rejects %s", async (_label, override) => {
-    const res = await apiFetch("POST", "/ticket-types", {
-      token: admin.token,
-      body: { ...valid, ...override },
-    });
+  ])("refuses %s", async (_label, body) => {
+    const res = await apiFetch("PATCH", "/ticket-types/general", { token: admin.token, body });
 
     expect(res.status).toBe(400);
   });
 
   it("is closed to staff", async () => {
-    const res = await apiFetch("POST", "/ticket-types", { token: staff.token, body: valid });
+    const res = await apiFetch("PATCH", "/ticket-types/general", { token: staff.token, body: { name: "X" } });
 
     expect(res.status).toBe(403);
   });
@@ -100,13 +84,13 @@ describe("updating a type", () => {
     await seedTicketType("general", { capacity: 5, sold: 2 });
   });
 
-  it("changes the price without touching the counter", async () => {
+  it("changes the name shown on the web without touching the counter", async () => {
     const res = await apiFetch("PATCH", "/ticket-types/general", {
       token: admin.token,
-      body: { price: 1500 },
+      body: { name: "Entrada general" },
     });
 
-    expect(res.body).toMatchObject({ price: 1500, sold: 2 });
+    expect(res.body).toMatchObject({ name: "Entrada general", price: 900, sold: 2 });
   });
 
   it("refuses a capacity below what is already sold", async () => {
@@ -136,7 +120,7 @@ describe("updating a type", () => {
   });
 
   it("reports an unknown type", async () => {
-    const res = await apiFetch("PATCH", "/ticket-types/ghost", { token: admin.token, body: { price: 1 } });
+    const res = await apiFetch("PATCH", "/ticket-types/ghost", { token: admin.token, body: { name: "X" } });
 
     expect(res.status).toBe(404);
   });
