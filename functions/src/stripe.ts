@@ -10,22 +10,21 @@ import { queueTicketEmails } from "./mail";
 import { cancelInTransaction } from "./tickets/cancel";
 import type { Ticket, TicketWrite } from "./types";
 
-// Declared only while online sales are on: the deploy fails if a declared secret
-// is missing from Secret Manager, even when no function binds it
-const secrets = ONLINE_SALES
-  ? { key: defineSecret("STRIPE_SECRET_KEY"), webhook: defineSecret("STRIPE_WEBHOOK_SECRET") }
-  : null;
+// The API key is always needed: the catalogue sync reads products even while online sales
+// are off. The webhook secret is declared only with online sales, because the deploy fails
+// if a declared secret is missing from Secret Manager, even when no function binds it.
+const secretKey = defineSecret("STRIPE_SECRET_KEY");
+const webhookSecret = ONLINE_SALES ? defineSecret("STRIPE_WEBHOOK_SECRET") : null;
 
-/** What the function must bind; empty while online sales are off. */
-export const stripeSecrets = secrets ? [secrets.key, secrets.webhook] : [];
+/** What the function must bind. */
+export const stripeSecrets = webhookSecret ? [secretKey, webhookSecret] : [secretKey];
 
-function secretValue(which: keyof NonNullable<typeof secrets>): string {
-  if (!secrets) throw new Error("online sales are off, so Stripe is not configured");
-  return secrets[which].value();
+export const stripeSecretKey = () => secretKey.value();
+
+export function stripeWebhookSecret(): string {
+  if (!webhookSecret) throw new Error("online sales are off, so the webhook is not configured");
+  return webhookSecret.value();
 }
-
-export const stripeSecretKey = () => secretValue("key");
-export const stripeWebhookSecret = () => secretValue("webhook");
 
 export const stripeWebhook = new Hono();
 

@@ -150,6 +150,11 @@ ticketPurchase.openapi(purchaseRoute, async (c) => {
       mode: "payment",
       line_items: items.map((item) => {
         const type = types.get(item.typeId)!;
+        // A type synced from Stripe is charged at Stripe's own price, so its catalogue,
+        // reports and receipts show the real product
+        if (type.stripePriceId) {
+          return { price: type.stripePriceId, quantity: 1 };
+        }
         return {
           price_data: {
             currency: "eur",

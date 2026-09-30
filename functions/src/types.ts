@@ -30,6 +30,9 @@ export type TicketType = {
   // Sale window as UTC ISO date-times; absent or null means open on that side
   salesStart?: string | null;
   salesEnd?: string | null;
+  // Set by the Stripe sync; the price is Stripe's and only changes there
+  stripeProductId?: string | null;
+  stripePriceId?: string | null;
 };
 
 export type CheckIn = {

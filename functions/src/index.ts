@@ -17,6 +17,7 @@ import { doorSale } from "./tickets/doorSale";
 import { ticketLookup } from "./tickets/lookup";
 import { ticketCancel } from "./tickets/cancel";
 import { ticketQr } from "./tickets/qr";
+import { ticketTypeSync } from "./tickets/stripeSync";
 import { adminTicketTypes, ticketTypes } from "./tickets/ticketTypes";
 import { ticketPurchase, tickets } from "./tickets/tickets";
 import { lanParty } from "./users/lanParty";
@@ -72,6 +73,7 @@ app.route("/ticket-types", ticketTypes);
 app.use("*", requireAuth);
 
 app.route("/ticket-types", adminTicketTypes);
+app.route("/ticket-types", ticketTypeSync);
 
 app.openapi(
   createRoute({

@@ -9,8 +9,6 @@ import type { TicketType } from "../types";
 import { isOnSale } from "./capacity";
 
 export const ticketTypes = new OpenAPIHono<Env>();
-
-const ALREADY_EXISTS = 6;
 export const adminTicketTypes = new OpenAPIHono<Env>();
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be an ISO date (YYYY-MM-DD)");
@@ -25,15 +23,18 @@ const saleBound = z.iso
 const TicketTypeSchema = z.object({
   id: z.string(),
   name: z.string(),
-  price: z.int().nonnegative(),
+  price: z.int().nonnegative().openapi({ description: "Cents; comes from Stripe and only changes there" }),
   capacity: z.int().nonnegative().nullable(), // 0 means not for sale, null unlimited
   isLanParty: z.boolean(),
-  days: z.array(isoDate).min(1),
+  days: z.array(isoDate).openapi({ description: "Empty on a type just synced from Stripe, until an admin sets it" }),
   salesStart: saleBound.optional().openapi({ description: "When sales open; null or absent means already open" }),
   salesEnd: saleBound.optional().openapi({ description: "When sales close (exclusive); null or absent means never" }),
   sold: z.int().nonnegative(),
   remaining: z.int().nonnegative().nullable(),
-  onSale: z.boolean().openapi({ description: "Whether the sale window is open now, by the server's clock" }),
+  onSale: z.boolean().openapi({
+    description: "Whether it can be bought now: days set and the sale window open, by the server's clock",
+  }),
+  stripeProductId: z.string().nullable().openapi({ description: "The Stripe product it was synced from" }),
 });
 
 const windowInOrder = (type: { salesStart?: string | null; salesEnd?: string | null }) =>
@@ -41,15 +42,15 @@ const windowInOrder = (type: { salesStart?: string | null; salesEnd?: string | n
 
 const WINDOW_ORDER_MESSAGE = "salesStart must be before salesEnd";
 
-// strict so a misspelled or system-managed field (like `sold`) is an error, not ignored
-const BaseCreateSchema = TicketTypeSchema.omit({ sold: true, remaining: true, onSale: true })
-  .extend({ id: z.string().regex(/^[a-z0-9-]+$/, "must be lowercase letters, numbers and dashes") })
-  .strict();
-
-const CreateSchema = BaseCreateSchema.refine(windowInOrder, { message: WINDOW_ORDER_MESSAGE });
-
+// What the web may change. Price, name source and the Stripe link come from the Stripe sync;
+// strict so trying to set one of those (or `sold`) is an error, not silently ignored.
 // Only checks the window when both ends are in the patch; the handler checks it against the stored type
-const UpdateSchema = BaseCreateSchema.omit({ id: true }).partial().strict();
+const UpdateSchema = TicketTypeSchema.pick({
+  name: true, capacity: true, isLanParty: true, salesStart: true, salesEnd: true,
+})
+  .extend({ days: z.array(isoDate).min(1) })
+  .partial()
+  .strict();
 
 const params = z.object({
   id: z.string().min(1).openapi({ param: { name: "id", in: "path" } }),
@@ -69,6 +70,7 @@ function present(id: string, type: Omit<TicketType, "id">) {
     sold,
     remaining: type.capacity === null ? null : Math.max(type.capacity - sold, 0),
     onSale: isOnSale(type),
+    stripeProductId: type.stripeProductId ?? null,
   };
 }
 
@@ -99,61 +101,13 @@ ticketTypes.openapi(
 
 adminTicketTypes.openapi(
   createRoute({
-    method: "post",
-    path: "/",
-    tags: ["Ticket types"],
-    summary: "Create a ticket type",
-    description: "Admin only. `sold` is maintained by the API and cannot be set here.",
-    security: bearerAuth,
-    ...auditedAs("ticketType.create"),
-    middleware: [requireAdmin] as const,
-    request: {
-      body: { required: true, content: { "application/json": { schema: CreateSchema } } },
-    },
-    responses: {
-      200: {
-        description: "Created",
-        content: { "application/json": { schema: TicketTypeSchema } },
-      },
-      400: { description: "Invalid body, or the sale window would end before it starts" },
-      403: { description: "Caller is not admin" },
-      409: { description: "A ticket type with that id already exists" },
-    },
-  }),
-  async (c) => {
-    const { id, ...type } = c.req.valid("json");
-    const db = getFirestore();
-    const batch = db.batch();
-
-    batch.create(db.doc(`ticketTypes/${id}`), { ...type, sold: 0 });
-    audit(batch, {
-      actor: c.get("user"),
-      action: "ticketType.create",
-      target: { id, label: type.name },
-      details: { fields: type },
-    });
-
-    try {
-      await batch.commit();
-    } catch (err) {
-      if ((err as { code?: number }).code === ALREADY_EXISTS) {
-        throw new HTTPException(409, { message: `ticket type already exists: ${id}` });
-      }
-      throw err;
-    }
-
-    return c.json(present(id, { ...type, sold: 0 }), 200);
-  },
-);
-
-adminTicketTypes.openapi(
-  createRoute({
     method: "patch",
     path: "/{id}",
     tags: ["Ticket types"],
     summary: "Update a ticket type",
     description:
-      "Admin only. Capacity cannot go below what is already sold; set it equal to `sold` to stop sales. " +
+      "Admin only. The price can't be changed here: change it in Stripe and sync. " +
+      "Capacity cannot go below what is already sold; set it equal to `sold` to stop sales. " +
       "Changing `days` or `isLanParty` does not affect tickets already issued. " +
       "Send null for `salesStart` or `salesEnd` to remove that bound.",
     security: bearerAuth,

@@ -3,10 +3,18 @@ import { HTTPException } from "hono/http-exception";
 
 import type { TicketType } from "../types";
 
-/** Whether a type's sale window is open at `now`; a missing bound leaves that side open. */
-export function isOnSale(type: Pick<TicketType, "salesStart" | "salesEnd">, now = new Date()): boolean {
+/**
+ * Whether a type can be sold at `now`: it grants at least one day (a type just synced from
+ * Stripe has none until an admin sets them) and its sale window is open. A missing bound
+ * leaves that side of the window open.
+ */
+export function isOnSale(
+  type: Pick<TicketType, "days" | "salesStart" | "salesEnd">,
+  now = new Date(),
+): boolean {
   const time = now.getTime();
-  return (!type.salesStart || Date.parse(type.salesStart) <= time)
+  return type.days.length > 0
+    && (!type.salesStart || Date.parse(type.salesStart) <= time)
     && (!type.salesEnd || time < Date.parse(type.salesEnd));
 }
 
