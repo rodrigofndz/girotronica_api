@@ -7,11 +7,12 @@ import {
 
 // Only the product listing is faked; everything else about the Stripe class stays real
 const listProducts = vi.hoisted(() => vi.fn());
+const retrieveProduct = vi.hoisted(() => vi.fn());
 
 vi.mock("stripe", async (importOriginal) => {
   const Real = ((await importOriginal()) as { default: new (key: string) => object }).default;
   class FakeCatalogueStripe extends Real {
-    products = { list: listProducts };
+    products = { list: listProducts, retrieve: retrieveProduct };
   }
   return { default: FakeCatalogueStripe };
 });
@@ -46,6 +47,7 @@ afterAll(stopApi);
 beforeEach(async () => {
   await resetEmulators();
   listProducts.mockReset();
+  retrieveProduct.mockReset();
   admin = await createUser("admin@example.com", "admin");
   staff = await createUser("staff@example.com", "staff");
 });
@@ -188,5 +190,64 @@ describe("the sync itself", () => {
 
     expect(res.status).toBe(502);
     expect((await getFirestore().collection("ticketTypes").get()).empty).toBe(true);
+  });
+});
+
+describe("deleting a synced type", () => {
+  beforeEach(async () => {
+    catalogue([{ id: "prod_pack", name: "Pack", default_price: eur("price_pack", 1300) }]);
+    await sync();
+  });
+
+  const remove = () => apiFetch("DELETE", "/ticket-types/pack", { token: admin.token });
+
+  it("is refused while its Stripe product is active, since the next sync would bring it back", async () => {
+    retrieveProduct.mockResolvedValue({ id: "prod_pack", active: true });
+
+    const res = await remove();
+
+    expect(res.status).toBe(409);
+    // The web tells this 409 apart from "tickets sold" by this wording; changing it breaks the web
+    expect(res.body).toContain("Stripe product is still active");
+    expect(res.body).toContain("archive it in Stripe first");
+    expect(await stored("pack")).toBeDefined();
+    expect(retrieveProduct).toHaveBeenCalledWith("prod_pack");
+  });
+
+  it("is allowed once the product is archived in Stripe", async () => {
+    retrieveProduct.mockResolvedValue({ id: "prod_pack", active: false });
+
+    expect((await remove()).status).toBe(200);
+    expect(await stored("pack")).toBeUndefined();
+    expect(await auditEntries("ticketType.delete")).toHaveLength(1);
+  });
+
+  it("is allowed when the product was deleted outright in Stripe", async () => {
+    retrieveProduct.mockRejectedValue(Object.assign(new Error("No such product"), { code: "resource_missing" }));
+
+    expect((await remove()).status).toBe(200);
+  });
+
+  it("is refused, deleting nothing, when Stripe can't be reached", async () => {
+    retrieveProduct.mockRejectedValue(new Error("stripe is down"));
+
+    expect((await remove()).status).toBe(502);
+    expect(await stored("pack")).toBeDefined();
+  });
+
+  // Sales don't block deleting for now (testing), but the log keeps how many there were
+  it("deletes an archived type even with sales, recording how many", async () => {
+    retrieveProduct.mockResolvedValue({ id: "prod_pack", active: false });
+    await getFirestore().doc("ticketTypes/pack").update({ sold: 3 });
+
+    expect((await remove()).status).toBe(200);
+    expect((await auditEntries("ticketType.delete"))[0].details).toEqual({ sold: 3 });
+  });
+
+  it("doesn't ask Stripe about a type made by hand", async () => {
+    await seedTicketType("manual");
+
+    expect((await apiFetch("DELETE", "/ticket-types/manual", { token: admin.token })).status).toBe(200);
+    expect(retrieveProduct).not.toHaveBeenCalled();
   });
 });
