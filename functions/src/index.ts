@@ -12,7 +12,6 @@ import { adminExtras, extras } from "./extras/routes";
 import { bearerAuth } from "./schemas";
 import { ONLINE_SALES } from "./features";
 import { stripeSecrets, stripeWebhook } from "./stripe";
-import { ROLES } from "./types";
 import { checkin } from "./tickets/checkin";
 import { doorSale } from "./tickets/doorSale";
 import { ticketLookup } from "./tickets/lookup";
@@ -22,6 +21,7 @@ import { ticketTypeSync } from "./tickets/stripeSync";
 import { adminTicketTypes, ticketTypes } from "./tickets/ticketTypes";
 import { ticketPurchase, tickets } from "./tickets/tickets";
 import { lanParty } from "./users/lanParty";
+import { me } from "./users/me";
 import { userLookup } from "./users/lookup";
 import { staff } from "./users/staff";
 import { suspension } from "./users/suspend";
@@ -78,27 +78,7 @@ app.route("/ticket-types", adminTicketTypes);
 app.route("/ticket-types", ticketTypeSync);
 app.route("/extras", adminExtras);
 
-app.openapi(
-  createRoute({
-    method: "get",
-    path: "/me",
-    tags: ["Users"],
-    summary: "Get the caller's identity and role",
-    security: bearerAuth,
-    responses: {
-      200: {
-        description: "The authenticated user",
-        content: {
-          "application/json": {
-            schema: z.object({ uid: z.string(), email: z.string().optional(), role: z.enum(ROLES) }),
-          },
-        },
-      },
-      401: { description: "Missing or invalid token" },
-    },
-  }),
-  (c) => c.json(c.get("user"), 200),
-);
+app.route("/me", me);
 
 app.route("/tickets", tickets);
 if (ONLINE_SALES) {

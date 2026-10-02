@@ -6,7 +6,7 @@ import { HTTPException } from "hono/http-exception";
 import { normalizeEmail } from "./schemas";
 import type { Role, UserProfile, UserProfileWrite } from "./types";
 
-export type User = { uid: string; email?: string; role: Role };
+export type User = { uid: string; email?: string; displayName: string | null; role: Role };
 export type Env = { Variables: { user: User } };
 
 const ALREADY_EXISTS = 6;
@@ -39,7 +39,8 @@ export const requireAuth = createMiddleware<Env>(async (c, next) => {
   }
 
   const email = decoded.email ? normalizeEmail(decoded.email) : null;
-  const displayName: string | null = decoded.name ?? null;
+  const authName: string | null = decoded.name ?? null;
+  let displayName = profile?.displayName ?? authName;
 
   if (!profile) {
     // A concurrent first request may have created it already; that one wins
@@ -47,19 +48,36 @@ export const requireAuth = createMiddleware<Env>(async (c, next) => {
       .create({
         role: "user",
         email,
-        displayName,
+        displayName: authName,
+        authName,
         createdAt: FieldValue.serverTimestamp(),
       } satisfies UserProfileWrite)
       .catch((err) => {
         if (err.code !== ALREADY_EXISTS) throw err;
       });
-  } else if (profile.email !== email || profile.displayName !== displayName) {
-    await ref.update({ email, displayName } satisfies Partial<UserProfileWrite>);
+  } else {
+    const updates: Partial<UserProfileWrite> = {};
+    if (profile.email !== email) updates.email = email;
+
+    if (profile.authName === undefined) {
+      // A profile from before authName: start tracking, and only fill an empty name
+      updates.authName = authName;
+      if (!profile.displayName && authName) updates.displayName = displayName = authName;
+    } else if (authName && authName !== profile.authName) {
+      // The name changed at the sign-in provider (e.g. in Google), so follow it
+      updates.authName = authName;
+      updates.displayName = displayName = authName;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await ref.update(updates);
+    }
   }
 
   c.set("user", {
     uid: decoded.uid,
     email: email ?? undefined,
+    displayName: displayName ?? null,
     role: profile?.role ?? "user",
   });
 

@@ -44,7 +44,12 @@ export type Extra = {
 export type UserProfile = {
   role: Role;
   email: string | null;
-  displayName: string | null;
+  displayName: string | null;     // shown to others, e.g. staff at check-in
+  // The last name their sign-in account gave (set by the web's profile form, or by Google).
+  // displayName only follows it when it changes, so a name set in Firestore by hand isn't
+  // overwritten on every request.
+  // Absent on profiles from before it existed.
+  authName?: string | null;
   createdAt: FirebaseFirestore.Timestamp;
   // Absent on profiles created before suspension existed; treated as not suspended
   suspended?: boolean;
