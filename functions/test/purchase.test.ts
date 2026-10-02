@@ -102,6 +102,18 @@ describe("buying online", () => {
     });
   });
 
+  it("charges a pack once per unit, not once per person", async () => {
+    await seedTicketType("pack-10", { capacity: 5, price: 35000, packSize: 2, stripePriceId: "price_pack10" });
+
+    await buy([item({ typeId: "pack-10" }), item({ typeId: "pack-10" }), item(), item()]);
+
+    const [session] = createSession.mock.calls[0];
+    expect(session.line_items).toEqual([
+      { price: "price_pack10", quantity: 1 },
+      expect.objectContaining({ quantity: 2, price_data: expect.objectContaining({ unit_amount: 900 }) }),
+    ]);
+  });
+
   it("links the checkout to exactly the tickets it created", async () => {
     await buy([item(), item()]);
 
