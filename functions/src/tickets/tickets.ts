@@ -9,6 +9,8 @@ import { audit, auditedAs } from "../audit/audit";
 import type { Env } from "../auth";
 import { bearerAuth, CheckinsSchema, checkinTimes, EmailSchema } from "../schemas";
 import { frontendUrl } from "../config";
+import { isAllowed } from "../cors";
+import { ONLINE_SALES_MODE } from "../features";
 import { stripeSecretKey } from "../stripe";
 import type { Ticket, TicketWrite } from "../types";
 import { releaseCapacity, reserveCapacity } from "./capacity";
@@ -99,6 +101,7 @@ const purchaseRoute = createRoute({
       },
     },
     400: { description: "Invalid body or unknown ticket type" },
+    403: { description: "Online sales are open to staff only for now (testing)" },
     409: { description: "A requested ticket type is sold out" },
   },
 });
@@ -106,6 +109,13 @@ const purchaseRoute = createRoute({
 ticketPurchase.openapi(purchaseRoute, async (c) => {
   const { items } = c.req.valid("json");
   const buyer = c.get("user");
+
+  // While a deployed setup is tested with Stripe's test key, a fake card must not get the
+  // public real tickets
+  if (ONLINE_SALES_MODE === "staff" && buyer.role === "user") {
+    throw new HTTPException(403, { message: "online sales are open to staff only for now" });
+  }
+
   const { uid } = buyer;
   const db = getFirestore();
 
@@ -144,6 +154,11 @@ ticketPurchase.openapi(purchaseRoute, async (c) => {
 
   const stripe = new Stripe(stripeSecretKey());
 
+  // Back to the site the purchase came from (e.g. a preview), but only one CORS already
+  // trusts, so this can't be turned into a redirect to anywhere
+  const origin = c.req.header("Origin");
+  const returnTo = origin && isAllowed(origin) ? origin : frontendUrl.value().replace(/\/+$/, "");
+
   let session: Stripe.Checkout.Session;
   try {
     session = await stripe.checkout.sessions.create({
@@ -164,8 +179,8 @@ ticketPurchase.openapi(purchaseRoute, async (c) => {
           quantity: 1,
         };
       }),
-      success_url: `${frontendUrl.value()}/tickets/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${frontendUrl.value()}/tickets`,
+      success_url: `${returnTo}/tickets/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${returnTo}/tickets`,
       metadata: { ticketIds: JSON.stringify(ticketRefs.map((ref) => ref.id)) },
     });
   } catch (err) {

@@ -24,7 +24,8 @@ function isPreviewOf(host: string, projects: string[]): boolean {
   return rest.length === 0 || (rest.length === 1 && /^[a-z0-9-]+$/.test(rest[0]));
 }
 
-function isAllowed(origin: string): boolean {
+/** Whether a browser origin may use the API: production, a dev server or an allowed preview. */
+export function isAllowed(origin: string): boolean {
   if ([stripSlash(frontendUrl.value()), ...DEV_ORIGINS].includes(stripSlash(origin))) {
     return true;
   }

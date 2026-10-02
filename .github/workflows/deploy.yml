@@ -52,6 +52,8 @@ jobs:
         env:
           FRONTEND_URL: ${{ vars.FRONTEND_URL }}
           PREVIEW_PROJECTS: ${{ vars.PREVIEW_PROJECTS }}
+          # off (default) | staff | public; see functions/src/features.ts
+          ONLINE_SALES: ${{ vars.ONLINE_SALES }}
         run: |
           if [ -z "$FRONTEND_URL" ]; then
             echo "::error::Set the FRONTEND_URL variable on the production environment"
@@ -60,6 +62,7 @@ jobs:
           {
             echo "FRONTEND_URL=$FRONTEND_URL"
             echo "PREVIEW_PROJECTS=$PREVIEW_PROJECTS"
+            echo "ONLINE_SALES=${ONLINE_SALES:-off}"
           } > functions/.env.girotronica-api
 
       - name: Authenticate to Google Cloud
