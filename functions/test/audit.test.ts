@@ -87,9 +87,9 @@ describe("what gets recorded", () => {
       expect.objectContaining({ targetId: ticket.id, targetLabel: "Anna", details: { day: today() } }),
     ]);
     expect((await auditEntries("ticket.scanRejected")).map((e) => [e.targetId, e.details])).toEqual([
-      [ticket.id, { day: today(), reason: "already_used" }],
-      [tomorrowOnly.id, { day: today(), reason: "wrong_day" }],
-      [null, { day: today(), reason: "not_found", code: "forged-code" }],
+      [ticket.id, { day: today(), reasons: ["already_used"] }],
+      [tomorrowOnly.id, { day: today(), reasons: ["wrong_day"] }],
+      [null, { day: today(), reasons: ["not_found"], code: "forged-code" }],
     ]);
   });
 
@@ -99,7 +99,7 @@ describe("what gets recorded", () => {
 
     await scan(ticket.code);
 
-    expect((await auditEntries("ticket.scanRejected"))[0].details.reason).toBe("invalid");
+    expect((await auditEntries("ticket.scanRejected"))[0].details.reasons).toEqual(["invalid"]);
   });
 
   it("records a cancellation once, with the status it had", async () => {

@@ -1,4 +1,4 @@
-import { getFirestore } from "firebase-admin/firestore";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -24,6 +24,7 @@ const sell = (typeId: string, people: number) =>
 
 const ticket = async (id: string) => (await getFirestore().doc(`tickets/${id}`).get()).data()!;
 const cancel = (id: string) => apiFetch("POST", `/tickets/${id}/cancel`, { token: admin.token });
+const reasons = (res: { body: { problems?: { reason: string }[] } }) => res.body.problems?.map((p) => p.reason);
 const scan = (code: string) => apiFetch("POST", "/tickets/checkin", { token: staff.token, body: { code } });
 
 beforeAll(startApi);
@@ -41,7 +42,7 @@ describe("the catalogue fields", () => {
 
     const [type] = (await apiFetch("GET", "/ticket-types")).body;
 
-    expect(type).toMatchObject({ category: "general", packSize: 1, singleEntry: false, extrasFrom: "general" });
+    expect(type).toMatchObject({ category: "general", packSize: 1, entries: "once", extrasFrom: "general" });
   });
 
   it("lets an admin set them", async () => {
@@ -49,10 +50,10 @@ describe("the catalogue fields", () => {
 
     const res = await apiFetch("PATCH", "/ticket-types/pack-10-lan-party", {
       token: admin.token,
-      body: { category: "pack", packSize: 10, extrasFrom: "lan" },
+      body: { category: "pack", packSize: 10, entries: "daily", extrasFrom: "lan" },
     });
 
-    expect(res.body).toMatchObject({ category: "pack", packSize: 10, singleEntry: false, extrasFrom: "lan" });
+    expect(res.body).toMatchObject({ category: "pack", packSize: 10, entries: "daily", extrasFrom: "lan" });
   });
 
   it("refuses changing the pack size once units are sold", async () => {
@@ -67,6 +68,8 @@ describe("the catalogue fields", () => {
     ["an unknown category", { category: "vip" }],
     ["a pack of zero", { packSize: 0 }],
     ["an unknown extras group", { extrasFrom: "pack" }],
+    ["an unknown entries rule", { entries: "twice" }],
+    ["the old singleEntry flag", { singleEntry: true }],
   ])("refuses %s", async (_label, body) => {
     await seedTicketType("general");
 
@@ -140,35 +143,52 @@ describe("selling packs", () => {
   });
 });
 
-describe("single-entry tickets", () => {
-  it("let their holder in once, then refuse on any day", async () => {
-    await seedTicketType("entrada-infants", { singleEntry: true, days: [today(), "2099-01-01"] });
+describe("how often a ticket gets in", () => {
+  // Today must be one of its days, and another day already used, to tell the two rules apart
+  const usedYesterday = async (id: string) =>
+    getFirestore().doc(`tickets/${id}`).update({
+      "checkins.2099-01-01": { at: new Date("2099-01-01T10:00:00Z"), by: staff.uid },
+    });
+
+  it("once by default: in on any of its days, then refused", async () => {
+    await seedTicketType("entrada-infants", { days: [today(), "2099-01-01"] });
     const [t] = (await sell("entrada-infants", 1)).body;
 
     expect((await scan(t.code)).body.result).toBe("valid");
-    expect((await scan(t.code)).body.result).toBe("already_used");
-    expect((await ticket(t.id)).singleEntry).toBe(true);
+    expect(reasons(await scan(t.code))).toEqual(["already_used"]);
+    expect((await ticket(t.id)).entries).toBe("once");
   });
 
-  it("refuse a second entry even when the first was on another day", async () => {
-    await seedTicketType("entrada-jubilats", { singleEntry: true, days: [today(), "2099-01-01"] });
+  it("once: refused even when the first entry was another day, naming it", async () => {
+    await seedTicketType("entrada-jubilats", { days: [today(), "2099-01-01"] });
     const [t] = (await sell("entrada-jubilats", 1)).body;
-    await getFirestore().doc(`tickets/${t.id}`).update({
-      "checkins.2099-01-01": { at: new Date("2099-01-01T10:00:00Z"), by: staff.uid },
-    });
+    await usedYesterday(t.id);
 
-    const res = await scan(t.code);
-
-    expect(res.body).toMatchObject({ result: "already_used", checkedInBy: staff.uid });
+    expect((await scan(t.code)).body.problems).toEqual([expect.objectContaining({ reason: "already_used", checkedInBy: staff.uid })]);
   });
 
-  it("don't change multi-day tickets, which allow one entry per day", async () => {
-    await seedTicketType("pack-3-dies", { days: [today(), "2099-01-01"] });
+  it("once also applies to tickets sold before the rule existed", async () => {
+    await seedTicketType("old", { days: [today(), "2099-01-01"] });
+    const [t] = (await sell("old", 1)).body;
+    await getFirestore().doc(`tickets/${t.id}`).update({ entries: FieldValue.delete() });
+    await usedYesterday(t.id);
+
+    expect(reasons(await scan(t.code))).toEqual(["already_used"]);
+  });
+
+  it("daily: in once on each day it covers", async () => {
+    await seedTicketType("pack-3-dies", { entries: "daily", days: [today(), "2099-01-01"] });
     const [t] = (await sell("pack-3-dies", 1)).body;
-    await getFirestore().doc(`tickets/${t.id}`).update({
-      "checkins.2099-01-01": { at: new Date("2099-01-01T10:00:00Z"), by: staff.uid },
-    });
+    await usedYesterday(t.id);
 
     expect((await scan(t.code)).body.result).toBe("valid");
+    expect(reasons(await scan(t.code))).toEqual(["already_used"]);
+  });
+
+  it("still refuses a day the ticket doesn't cover, either way", async () => {
+    await seedTicketType("entrada-dissabte", { days: ["2099-01-01"] });
+    const [t] = (await sell("entrada-dissabte", 1)).body;
+
+    expect((await scan(t.code)).body.problems).toEqual([{ reason: "wrong_day", days: ["2099-01-01"] }]);
   });
 });

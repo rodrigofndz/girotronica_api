@@ -68,11 +68,11 @@ export async function apiFetch<T = any>(
 export type TestUser = { uid: string; token: string; email: string };
 
 /** Creates an account and gives it a role, making the profile the way requireAuth would. */
-export async function createUser(email: string, role: Role = "user"): Promise<TestUser> {
+export async function createUser(email: string, role: Role = "user", displayName?: string): Promise<TestUser> {
   const res = await fetch(`${AUTH}/accounts:signUp?key=fake`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password: "secret123", returnSecureToken: true }),
+    body: JSON.stringify({ email, password: "secret123", displayName, returnSecureToken: true }),
   });
   const account = await res.json();
   const user = { uid: account.localId, token: account.idToken, email };

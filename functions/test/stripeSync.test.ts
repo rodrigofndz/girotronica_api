@@ -62,7 +62,7 @@ describe("a new Stripe product", () => {
     expect(await stored("pack-de-tres-dies")).toEqual({
       name: "Pack de tres dies", price: 1300, capacity: 0, isLanParty: false, days: [], sold: 0,
       stripeProductId: "prod_pack", stripePriceId: "price_pack",
-      category: "general", packSize: 1, singleEntry: false, extrasFrom: "general",
+      category: "general", packSize: 1, entries: "once", extrasFrom: "general",
     });
     const [listed] = (await apiFetch("GET", "/ticket-types")).body;
     expect(listed).toMatchObject({ onSale: false, stripeProductId: "prod_pack" });

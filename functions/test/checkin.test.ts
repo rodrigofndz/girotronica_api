@@ -48,13 +48,18 @@ describe("check-in", () => {
 
   it("reports a second scan as already used, with who and when", async () => {
     const ticket = await givenTicket();
+    // The name comes from the scanner's sign-in account, as Google sign-in provides
+    staff = await createUser("named.staff@example.com", "staff", "Staff Member");
     await scan(ticket.code);
 
     const res = await scan(ticket.code);
 
-    expect(res.body.result).toBe("already_used");
-    expect(res.body.checkedInBy).toBe(staff.uid);
-    expect(Date.parse(res.body.checkedInAt)).not.toBeNaN();
+    expect(res.body).toMatchObject({ result: "rejected", holderName: "Holder" });
+    expect(res.body.problems).toEqual([
+      { reason: "already_used", checkedInBy: staff.uid, checkedInByEmail: "named.staff@example.com",
+        checkedInByName: "Staff Member", checkedInAt: expect.any(String) },
+    ]);
+    expect(Date.parse(res.body.problems[0].checkedInAt)).not.toBeNaN();
   });
 
   it("does not turn a retried scan into a rejection", async () => {
@@ -80,30 +85,43 @@ describe("check-in", () => {
 
     const res = await scan(ticket.code);
 
-    expect(res.body).toMatchObject({ result: "wrong_day", days: ["2026-01-01"] });
+    expect(res.body.problems).toEqual([{ reason: "wrong_day", days: ["2026-01-01"] }]);
   });
 
   it("refuses a ticket that is not paid for", async () => {
     const ticket = await givenTicket({ status: "pending" });
 
-    expect((await scan(ticket.code)).body).toMatchObject({ result: "invalid", status: "pending" });
+    expect((await scan(ticket.code)).body.problems).toEqual([{ reason: "invalid", status: "pending" }]);
   });
 
   it("refuses a cancelled ticket", async () => {
     const ticket = await givenTicket({ status: "cancelled" });
 
-    expect((await scan(ticket.code)).body).toMatchObject({ result: "invalid", status: "cancelled" });
+    expect((await scan(ticket.code)).body.problems).toEqual([{ reason: "invalid", status: "cancelled" }]);
   });
 
   it("reports an unknown code as not found", async () => {
-    expect((await scan("no-such-code")).body).toEqual({ result: "not_found" });
+    expect((await scan("no-such-code")).body).toEqual({
+      result: "rejected", holderName: null, typeId: null, problems: [{ reason: "not_found" }],
+    });
+  });
+
+  it("lists every problem at once, not just the first", async () => {
+    const ticket = await givenTicket({ status: "cancelled", days: ["2026-01-01"] });
+    await getFirestore().doc(`tickets/${ticket.id}`).update({
+      "checkins.2026-01-01": { at: new Date("2026-01-01T10:00:00Z"), by: staff.uid },
+    });
+
+    const res = await scan(ticket.code);
+
+    expect(res.body.problems.map((p: { reason: string }) => p.reason)).toEqual(["invalid", "wrong_day", "already_used"]);
   });
 
   it("lets only one of two simultaneous scans win", async () => {
     const ticket = await givenTicket();
 
     const results = await Promise.all([scan(ticket.code), scan(ticket.code)]);
-    const outcomes = results.map((r) => r.body.result).sort();
+    const outcomes = results.map((r) => r.body.problems?.[0].reason ?? r.body.result).sort();
 
     expect(outcomes).toEqual(["already_used", "valid"]);
   });
