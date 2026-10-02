@@ -16,6 +16,24 @@ export type TicketCategory = (typeof TICKET_CATEGORIES)[number];
 export const EXTRA_GROUPS = ["general", "lan"] as const;
 export type ExtraGroup = (typeof EXTRA_GROUPS)[number];
 
+/**
+ * Something sold alongside a ticket (a T-shirt, a dormitory place…). Its price comes from its
+ * Stripe product, like a ticket type's; the rest is set by an admin.
+ */
+export type Extra = {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number;              // cents; comes from Stripe and only changes there
+  options: string[];          // e.g. sizes; when not empty the buyer must pick one
+  consent: string | null;     // text the buyer accepts by choosing it
+  groups: ExtraGroup[];       // which ticket types offer it (by their extrasFrom); empty: not offered
+  capacity: number | null;    // total stock, null for unlimited
+  sold?: number;
+  stripeProductId: string;
+  stripePriceId: string;
+};
+
 export type UserProfile = {
   role: Role;
   email: string | null;

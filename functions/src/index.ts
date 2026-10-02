@@ -8,6 +8,7 @@ import { Scalar } from "@scalar/hono-api-reference";
 import { auditLog } from "./audit/routes";
 import { type Env, requireAuth, requireAdmin } from "./auth";
 import { corsMiddleware } from "./cors";
+import { adminExtras, extras } from "./extras/routes";
 import { bearerAuth } from "./schemas";
 import { ONLINE_SALES } from "./features";
 import { stripeSecrets, stripeWebhook } from "./stripe";
@@ -69,11 +70,13 @@ if (ONLINE_SALES) {
   app.route("/stripe/webhook", stripeWebhook);
 }
 app.route("/ticket-types", ticketTypes);
+app.route("/extras", extras);
 
 app.use("*", requireAuth);
 
 app.route("/ticket-types", adminTicketTypes);
 app.route("/ticket-types", ticketTypeSync);
+app.route("/extras", adminExtras);
 
 app.openapi(
   createRoute({

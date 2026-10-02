@@ -5,6 +5,8 @@ import Stripe from "stripe";
 
 import { audit, auditedAs } from "../audit/audit";
 import { requireAdmin, type Env, type User } from "../auth";
+import { syncExtraProduct } from "../extras/sync";
+import { chargeablePrice, slugify } from "../stripeCatalogue";
 import { bearerAuth } from "../schemas";
 import { stripeSecretKey } from "../stripe";
 import type { TicketType } from "../types";
@@ -13,28 +15,21 @@ export const ticketTypeSync = new OpenAPIHono<Env>();
 
 const TYPE_ID = /^[a-z0-9-]+$/;
 
-/** "Trònic-con (dissabte)" → "tronic-con-dissabte" */
-export function slugify(name: string): string {
-  return name
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
 type StoredType = Omit<TicketType, "id">;
-type Changes = Record<string, { from: unknown; to: unknown }>;
+export type Changes = Record<string, { from: unknown; to: unknown }>;
 
 const ResultSchema = z.object({
   stripeProductId: z.string(),
   name: z.string(),
+  kind: z.enum(["ticketType", "extra"]).openapi({ description: "Products with metadata.kind = extra are extras" }),
   result: z.enum(["created", "updated", "unchanged", "skipped"]),
-  typeId: z.string().nullable(),
+  typeId: z.string().nullable().openapi({ description: "The ticket type, for kind ticketType" }),
+  extraId: z.string().nullable().openapi({ description: "The extra, for kind extra" }),
   changes: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })),
   reason: z.string().nullable().openapi({ description: "Why it was skipped" }),
 });
-type Result = z.infer<typeof ResultSchema>;
+export type SyncResult = z.infer<typeof ResultSchema>;
+type Result = SyncResult;
 
 /**
  * Brings one Stripe product into its ticket type. Stripe owns the price; the name is
@@ -42,17 +37,15 @@ type Result = z.infer<typeof ResultSchema>;
  * (days, capacity, LAN, sale window) is the admin's and never touched.
  */
 async function syncProduct(actor: User, product: Stripe.Product): Promise<Result> {
-  const base = { stripeProductId: product.id, name: product.name, typeId: null, changes: {}, reason: null };
+  const base = {
+    stripeProductId: product.id, name: product.name, kind: "ticketType" as const,
+    typeId: null, extraId: null, changes: {}, reason: null,
+  };
   const skip = (reason: string): Result => ({ ...base, result: "skipped", reason });
 
-  const price = product.default_price;
-  if (!price || typeof price === "string") {
-    return skip("the product has no default price");
-  }
-  if (price.type !== "one_time" || price.currency !== "eur" || price.unit_amount === null) {
-    return skip("the default price must be a one-time price in EUR");
-  }
-  const amount = price.unit_amount;
+  const price = chargeablePrice(product);
+  if (typeof price === "string") return skip(price);
+  const amount = price.unit_amount!;
 
   const db = getFirestore();
 
@@ -135,12 +128,13 @@ ticketTypeSync.openapi(
     tags: ["Ticket types"],
     summary: "Sync ticket types from Stripe",
     description:
-      "Admin only. Each Stripe product is one ticket type, priced by its default price. " +
+      "Admin only. Each Stripe product is one ticket type, priced by its default price, or an " +
+      "extra if its metadata has kind = extra. " +
       "New products arrive not for sale (no days, capacity 0) until an admin completes them. " +
       "Prices always follow Stripe; a name is only filled in when empty. " +
       "Products archived in Stripe stop selling. Safe to run as often as needed.",
     security: bearerAuth,
-    ...auditedAs("ticketType.stripeSync"),
+    ...auditedAs("ticketType.stripeSync", "extra.stripeSync"),
     middleware: [requireAdmin] as const,
     responses: {
       200: {
@@ -165,7 +159,11 @@ ticketTypeSync.openapi(
     // One at a time, so two products that would take the same id can't race each other
     const results: Result[] = [];
     for (const product of products) {
-      results.push(await syncProduct(c.get("user"), product));
+      results.push(
+        product.metadata.kind === "extra"
+          ? await syncExtraProduct(c.get("user"), product)
+          : await syncProduct(c.get("user"), product),
+      );
     }
 
     return c.json({ results }, 200);

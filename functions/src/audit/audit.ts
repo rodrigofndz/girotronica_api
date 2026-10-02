@@ -6,7 +6,7 @@ import { PAYMENT_METHODS, TICKET_STATUSES, type Role } from "../types";
 
 export const AUDIT_COLLECTION = "auditLog";
 
-export const AUDIT_TARGETS = ["ticket", "ticketType", "user"] as const;
+export const AUDIT_TARGETS = ["ticket", "ticketType", "extra", "user"] as const;
 export type AuditTarget = (typeof AUDIT_TARGETS)[number];
 
 export const SCAN_REJECTIONS = ["already_used", "wrong_day", "invalid", "not_found"] as const;
@@ -33,6 +33,18 @@ export const AUDIT_ACTIONS = {
       created: z.boolean(),
       changes: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })),
     }),
+  },
+  "extra.stripeSync": {
+    description: "Extra created or updated from its Stripe product",
+    details: z.object({
+      stripeProductId: z.string(),
+      created: z.boolean(),
+      changes: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })),
+    }),
+  },
+  "extra.update": {
+    description: "Extra edited; only the fields that changed",
+    details: z.object({ changes: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })) }),
   },
   "ticketType.update": {
     description: "Ticket type edited; only the fields that changed",
