@@ -7,7 +7,7 @@ import { audit, auditedAs } from "../audit/audit";
 import { requireAdmin, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
 import { stripeSecretKey } from "../stripe";
-import { EXTRA_GROUPS, TICKET_CATEGORIES, type TicketType, typeSettings } from "../types";
+import { ENTRY_RULES, EXTRA_GROUPS, TICKET_CATEGORIES, type TicketType, typeSettings } from "../types";
 import { isOnSale } from "./capacity";
 
 export const ticketTypes = new OpenAPIHono<Env>();
@@ -41,8 +41,8 @@ const TicketTypeSchema = z.object({
   packSize: z.int().min(1).openapi({
     description: "Tickets per unit sold, one per person; capacity, sold and remaining count units",
   }),
-  singleEntry: z.boolean().openapi({
-    description: "One check-in in total, on any of its days, instead of one per day",
+  entries: z.enum(ENTRY_RULES).openapi({
+    description: "once: one check-in in total, on any of its days (default). daily: one per day it covers",
   }),
   extrasFrom: z.enum(EXTRA_GROUPS).nullable().openapi({ description: "Which extras it offers; null for none" }),
 });
@@ -57,7 +57,7 @@ const WINDOW_ORDER_MESSAGE = "salesStart must be before salesEnd";
 // Only checks the window when both ends are in the patch; the handler checks it against the stored type
 const UpdateSchema = TicketTypeSchema.pick({
   name: true, capacity: true, isLanParty: true, salesStart: true, salesEnd: true,
-  category: true, packSize: true, singleEntry: true, extrasFrom: true,
+  category: true, packSize: true, entries: true, extrasFrom: true,
 })
   .extend({ days: z.array(isoDate).min(1) })
   .partial()
@@ -120,7 +120,7 @@ adminTicketTypes.openapi(
     description:
       "Admin only. The price can't be changed here: change it in Stripe and sync. " +
       "Capacity cannot go below what is already sold; set it equal to `sold` to stop sales. " +
-      "Changing `days`, `isLanParty` or `singleEntry` does not affect tickets already issued; " +
+      "Changing `days`, `isLanParty` or `entries` does not affect tickets already issued; " +
       "`packSize` can't change once units are sold. " +
       "Send null for `salesStart` or `salesEnd` to remove that bound.",
     security: bearerAuth,

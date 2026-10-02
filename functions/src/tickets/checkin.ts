@@ -4,7 +4,7 @@ import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { audit, auditedAs } from "../audit/audit";
 import { requireStaff, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
-import { TICKET_STATUSES, type Ticket } from "../types";
+import { TICKET_STATUSES, type Ticket, type UserProfile } from "../types";
 
 export const checkin = new OpenAPIHono<Env>();
 
@@ -17,16 +17,32 @@ function today(): string {
   );
 }
 
+// Every problem that applies is listed, not just the first, so the door sees the whole story
+const ProblemSchema = z.discriminatedUnion("reason", [
+  z.object({ reason: z.literal("not_found") }).openapi({ description: "No ticket has this code; always alone" }),
+  z.object({ reason: z.literal("invalid"), status: z.enum(TICKET_STATUSES) })
+    .openapi({ description: "Not paid yet (pending) or cancelled" }),
+  z.object({ reason: z.literal("wrong_day"), days: z.array(z.string()) })
+    .openapi({ description: "Today isn't one of its days" }),
+  z.object({
+    reason: z.literal("already_used"),
+    checkedInAt: z.string(),
+    checkedInBy: z.string().openapi({ description: "Uid of the staff member who let them in" }),
+    checkedInByEmail: z.string().nullable().openapi({ description: "Their email, if their profile has one" }),
+    checkedInByName: z.string().nullable().openapi({ description: "Their display name, if their profile has one" }),
+  })
+    .openapi({ description: "Already got in: today, or on any day for a ticket that gets in once" }),
+]);
+type Problem = z.infer<typeof ProblemSchema>;
+
 const CheckinResultSchema = z.discriminatedUnion("result", [
   z.object({ result: z.literal("valid"), holderName: z.string(), typeId: z.string() }),
   z.object({
-    result: z.literal("already_used"),
-    checkedInAt: z.string(),
-    checkedInBy: z.string(),
+    result: z.literal("rejected"),
+    holderName: z.string().nullable().openapi({ description: "Null when the code matched no ticket" }),
+    typeId: z.string().nullable(),
+    problems: z.array(ProblemSchema).min(1),
   }),
-  z.object({ result: z.literal("wrong_day"), days: z.array(z.string()) }),
-  z.object({ result: z.literal("invalid"), status: z.enum(TICKET_STATUSES) }),
-  z.object({ result: z.literal("not_found") }),
 ]);
 
 const checkinRoute = createRoute({
@@ -35,9 +51,10 @@ const checkinRoute = createRoute({
   tags: ["Tickets"],
   summary: "Check in a ticket at the door",
   description:
-    "Staff or admin. Uses the server's current event day (Europe/Madrid). A ticket allows one " +
-    "entry per day it covers, or one entry in total if its type is single-entry. " +
-    "Always returns 200; the outcome is in `result`, so a retried scan never looks like a failure.",
+    "Staff or admin. Uses the server's current event day (Europe/Madrid). A ticket gets in once " +
+    "in total, on any day it covers, or once per day if its type's entries are daily. " +
+    "Always returns 200; the outcome is in `result`, so a retried scan never looks like a failure. " +
+    "A rejection lists every problem that applies, e.g. both cancelled and not for today.",
   security: bearerAuth,
   ...auditedAs("ticket.checkin", "ticket.scanRejected"),
   middleware: [requireStaff] as const,
@@ -77,11 +94,11 @@ checkin.openapi(checkinRoute, async (c) => {
       actor: staff,
       action: "ticket.scanRejected",
       target: { id: null, label: null },
-      details: { day, reason: "not_found", code },
+      details: { day, reasons: ["not_found"], code },
     });
     await batch.commit();
 
-    return c.json({ result: "not_found" as const }, 200);
+    return c.json({ result: "rejected" as const, holderName: null, typeId: null, problems: [{ reason: "not_found" as const }] }, 200);
   }
 
   const ref = snap.docs[0].ref;
@@ -91,29 +108,40 @@ checkin.openapi(checkinRoute, async (c) => {
     const t = doc.data() as Ticket;
     const target = { id: doc.id, label: t.holderName };
 
-    const reject = <R extends { result: "invalid" | "wrong_day" | "already_used" }>(outcome: R) => {
-      audit(tx, { actor: staff, action: "ticket.scanRejected", target, details: { day, reason: outcome.result } });
-      return outcome;
-    };
+    const problems: Problem[] = [];
 
     if (t.status !== "active") {
-      return reject({ result: "invalid" as const, status: t.status });
+      problems.push({ reason: "invalid", status: t.status });
     }
 
     if (!t.days.includes(day)) {
-      return reject({ result: "wrong_day" as const, days: t.days });
+      problems.push({ reason: "wrong_day", days: t.days });
     }
 
-    // A single-entry ticket (e.g. kids, seniors) lets its holder in once, on any of its days
-    const existing = t.singleEntry
-      ? Object.values(t.checkins ?? {}).sort((a, b) => a.at.toMillis() - b.at.toMillis())[0]
-      : t.checkins?.[day];
+    // "once" (the default) lets its holder in a single time, on any of its days; "daily"
+    // once on each day it covers
+    const existing = t.entries === "daily"
+      ? t.checkins?.[day]
+      : Object.values(t.checkins ?? {}).sort((a, b) => a.at.toMillis() - b.at.toMillis())[0];
     if (existing) {
-      return reject({
-        result: "already_used" as const,
+      const scanner = (await tx.get(db.doc(`users/${existing.by}`))).data() as UserProfile | undefined;
+      problems.push({
+        reason: "already_used",
         checkedInAt: existing.at.toDate().toISOString(),
         checkedInBy: existing.by,
+        checkedInByEmail: scanner?.email ?? null,
+        checkedInByName: scanner?.displayName ?? null,
       });
+    }
+
+    if (problems.length > 0) {
+      audit(tx, {
+        actor: staff,
+        action: "ticket.scanRejected",
+        target,
+        details: { day, reasons: problems.map((p) => p.reason) },
+      });
+      return { result: "rejected" as const, holderName: t.holderName, typeId: t.typeId, problems };
     }
 
     tx.update(ref, {

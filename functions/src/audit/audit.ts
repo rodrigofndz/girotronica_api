@@ -69,8 +69,8 @@ export const AUDIT_ACTIONS = {
     details: z.object({ day: z.string() }),
   },
   "ticket.scanRejected": {
-    description: "Scan refused at the door; the code is kept only when no ticket has it",
-    details: z.object({ day: z.string(), reason: z.enum(SCAN_REJECTIONS), code: z.string().optional() }),
+    description: "Scan refused at the door, with every reason that applied; the code is kept only when no ticket has it",
+    details: z.object({ day: z.string(), reasons: z.array(z.enum(SCAN_REJECTIONS)), code: z.string().optional() }),
   },
   "ticket.cancel": {
     description: "Cancelled by an admin",

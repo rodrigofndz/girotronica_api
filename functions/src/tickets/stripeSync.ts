@@ -78,7 +78,7 @@ async function syncProduct(actor: User, product: Stripe.Product): Promise<Result
         stripePriceId: price.id,
         category: "general",
         packSize: 1,
-        singleEntry: false,
+        entries: "once",
         extrasFrom: "general",
       };
       const changes = Object.fromEntries(Object.entries(type).map(([field, to]) => [field, { from: null, to }]));

@@ -140,7 +140,7 @@ ticketPurchase.openapi(purchaseRoute, async (c) => {
         purchasedAt: FieldValue.serverTimestamp(),
         days: type.days,
         isLanParty: type.isLanParty,
-        singleEntry: typeSettings(type).singleEntry,
+        entries: typeSettings(type).entries,
         packId: packs[i],
         checkins: {},
       } satisfies TicketWrite);
