@@ -1,5 +1,5 @@
 import { declaredParams } from "firebase-functions/params";
-import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "../src/index";
 import {
@@ -14,6 +14,33 @@ afterAll(stopApi);
 beforeEach(async () => {
   await resetEmulators();
   buyer = await createUser("buyer@example.com");
+});
+
+describe("reading the switch", () => {
+  it("treats a missing or unrecognised value as off", async () => {
+    for (const value of [undefined, "", "true", "yes", "PUBLIC"]) {
+      vi.resetModules();
+      if (value === undefined) delete process.env.ONLINE_SALES;
+      else process.env.ONLINE_SALES = value;
+
+      const { ONLINE_SALES, ONLINE_SALES_MODE } = await import("../src/features");
+
+      expect([value, ONLINE_SALES_MODE, ONLINE_SALES]).toEqual([value, "off", false]);
+    }
+    delete process.env.ONLINE_SALES;
+  });
+
+  it("accepts staff and public", async () => {
+    for (const value of ["staff", "public"]) {
+      vi.resetModules();
+      process.env.ONLINE_SALES = value;
+
+      const { ONLINE_SALES, ONLINE_SALES_MODE } = await import("../src/features");
+
+      expect([ONLINE_SALES_MODE, ONLINE_SALES]).toEqual([value, true]);
+    }
+    delete process.env.ONLINE_SALES;
+  });
 });
 
 describe("with online sales switched off, as shipped", () => {

@@ -7,7 +7,7 @@ import {
 } from "./helpers";
 
 // Online sales ship switched off; these tests cover the code for when it is turned back on
-vi.mock("../src/features", () => ({ ONLINE_SALES: true }));
+vi.mock("../src/features", () => ({ ONLINE_SALES: true, ONLINE_SALES_MODE: "public" }));
 
 // Only the checkout call is faked; the real Stripe class (and its webhook signing) stays
 const createSession = vi.hoisted(() => vi.fn());

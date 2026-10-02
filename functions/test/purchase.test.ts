@@ -7,7 +7,7 @@ import {
 } from "./helpers";
 
 // Online sales ship switched off; these tests cover the code for when it is turned back on
-vi.mock("../src/features", () => ({ ONLINE_SALES: true }));
+vi.mock("../src/features", () => ({ ONLINE_SALES: true, ONLINE_SALES_MODE: "public" }));
 
 // Only the checkout call is faked; the real Stripe class (and its webhook signing) stays
 const createSession = vi.hoisted(() => vi.fn());
@@ -70,6 +70,36 @@ describe("buying online", () => {
 
     const [session] = createSession.mock.calls[0];
     expect(session.line_items).toEqual([{ price: "price_pack", quantity: 1 }]);
+  });
+
+  describe("where Stripe sends the buyer back", () => {
+    const returnUrls = async (origin?: string) => {
+      await apiFetch("POST", "/tickets", {
+        token: buyer.token,
+        body: { items: [item()] },
+        headers: origin ? { Origin: origin } : {},
+      });
+      const [session] = createSession.mock.calls.at(-1)!;
+      return [session.success_url, session.cancel_url];
+    };
+
+    it("is the site the purchase came from, when CORS trusts it (e.g. a preview)", async () => {
+      process.env.PREVIEW_PROJECTS = "girotronica-web";
+      const preview = "https://girotronica-web--pr7-abc123.web.app";
+
+      expect(await returnUrls(preview)).toEqual([
+        `${preview}/tickets/success?session_id={CHECKOUT_SESSION_ID}`,
+        `${preview}/tickets`,
+      ]);
+      delete process.env.PREVIEW_PROJECTS;
+    });
+
+    it("falls back to FRONTEND_URL for an untrusted or missing origin", async () => {
+      const home = "http://localhost:8080";
+
+      expect((await returnUrls("https://evil.example"))[0]).toBe(`${home}/tickets/success?session_id={CHECKOUT_SESSION_ID}`);
+      expect((await returnUrls())[1]).toBe(`${home}/tickets`);
+    });
   });
 
   it("links the checkout to exactly the tickets it created", async () => {
