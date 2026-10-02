@@ -12,8 +12,8 @@ import { frontendUrl } from "../config";
 import { isAllowed } from "../cors";
 import { ONLINE_SALES_MODE } from "../features";
 import { stripeSecretKey } from "../stripe";
-import type { Ticket, TicketWrite } from "../types";
-import { releaseCapacity, reserveCapacity } from "./capacity";
+import { type Ticket, type TicketWrite, typeSettings } from "../types";
+import { packIds, releaseCapacity, reserveCapacity } from "./capacity";
 
 export const tickets = new OpenAPIHono<Env>();
 
@@ -124,6 +124,7 @@ ticketPurchase.openapi(purchaseRoute, async (c) => {
   // One transaction so the capacity check and the tickets that consume it can't interleave
   const types = await db.runTransaction(async (tx) => {
     const reserved = await reserveCapacity(tx, items);
+    const packs = packIds(items, reserved);
 
     items.forEach((item, i) => {
       const type = reserved.get(item.typeId)!;
@@ -139,6 +140,8 @@ ticketPurchase.openapi(purchaseRoute, async (c) => {
         purchasedAt: FieldValue.serverTimestamp(),
         days: type.days,
         isLanParty: type.isLanParty,
+        singleEntry: typeSettings(type).singleEntry,
+        packId: packs[i],
         checkins: {},
       } satisfies TicketWrite);
       audit(tx, {
@@ -163,12 +166,14 @@ ticketPurchase.openapi(purchaseRoute, async (c) => {
   try {
     session = await stripe.checkout.sessions.create({
       mode: "payment",
-      line_items: items.map((item) => {
-        const type = types.get(item.typeId)!;
+      // One line per type, counted in units: a pack's price covers all of its tickets
+      line_items: [...types.values()].map((type) => {
+        const tickets = items.filter((item) => item.typeId === type.id).length;
+        const quantity = tickets / typeSettings(type).packSize;
         // A type synced from Stripe is charged at Stripe's own price, so its catalogue,
         // reports and receipts show the real product
         if (type.stripePriceId) {
-          return { price: type.stripePriceId, quantity: 1 };
+          return { price: type.stripePriceId, quantity };
         }
         return {
           price_data: {
@@ -176,7 +181,7 @@ ticketPurchase.openapi(purchaseRoute, async (c) => {
             unit_amount: type.price,
             product_data: { name: type.name },
           },
-          quantity: 1,
+          quantity,
         };
       }),
       success_url: `${returnTo}/tickets/success?session_id={CHECKOUT_SESSION_ID}`,

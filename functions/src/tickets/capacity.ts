@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
+
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
-import type { TicketType } from "../types";
+import { type Ticket, type TicketType, typeSettings } from "../types";
 
 /**
  * Whether a type can be sold at `now`: it grants at least one day (a type just synced from
@@ -19,9 +21,11 @@ export function isOnSale(
 }
 
 /**
- * Loads the requested ticket types, refuses the sale if any of them is outside its
- * sale window or would go over capacity, and reserves the slots by bumping their `sold` counters. Must run inside
- * a transaction so two buyers can't take the same last slot.
+ * Loads the requested ticket types, refuses the sale if any of them is outside its sale
+ * window or would go over capacity, and reserves the slots by bumping their `sold` counters.
+ * Items are tickets, one per person; a pack type is reserved in whole units of `packSize`
+ * tickets, and that's what its capacity and `sold` count. Must run inside a transaction so
+ * two buyers can't take the same last slot.
  */
 export async function reserveCapacity(
   tx: FirebaseFirestore.Transaction,
@@ -51,7 +55,18 @@ export async function reserveCapacity(
     }
   }
 
-  for (const [typeId, count] of wanted) {
+  const units = new Map<string, number>();
+  for (const [typeId, tickets] of wanted) {
+    const { packSize } = typeSettings(types.get(typeId)!);
+    if (tickets % packSize !== 0) {
+      throw new HTTPException(400, {
+        message: `${typeId} is sold in packs of ${packSize}; got ${tickets} tickets`,
+      });
+    }
+    units.set(typeId, tickets / packSize);
+  }
+
+  for (const [typeId, count] of units) {
     const type = types.get(typeId)!;
     if (type.capacity !== null && (type.sold ?? 0) + count > type.capacity) {
       throw new HTTPException(409, {
@@ -60,7 +75,7 @@ export async function reserveCapacity(
     }
   }
 
-  for (const [typeId, count] of wanted) {
+  for (const [typeId, count] of units) {
     tx.update(db.doc(`ticketTypes/${typeId}`), { sold: FieldValue.increment(count) });
   }
 
@@ -82,4 +97,56 @@ export function releaseCapacity(
   for (const [typeId, count] of counts) {
     tx.update(db.doc(`ticketTypes/${typeId}`), { sold: FieldValue.increment(-count) });
   }
+}
+
+/**
+ * The pack each item belongs to, in item order: every `packSize` items of a pack type share
+ * one id; items of a single-ticket type get null. Call after reserveCapacity, which has
+ * already checked the counts divide evenly.
+ */
+export function packIds(items: { typeId: string }[], types: Map<string, TicketType>): (string | null)[] {
+  const open = new Map<string, { id: string; left: number }>();
+
+  return items.map((item) => {
+    const { packSize } = typeSettings(types.get(item.typeId)!);
+    if (packSize === 1) return null;
+
+    let pack = open.get(item.typeId);
+    if (!pack || pack.left === 0) {
+      pack = { id: randomUUID(), left: packSize };
+      open.set(item.typeId, pack);
+    }
+    pack.left -= 1;
+    return pack.id;
+  });
+}
+
+/**
+ * How many units of stock come back when these tickets are cancelled: one per single ticket,
+ * and one per pack only once its last live ticket goes. Reads the packs' other tickets, so
+ * call it before the transaction writes anything.
+ */
+export async function unitsFreedBy(
+  tx: FirebaseFirestore.Transaction,
+  cancelling: { id: string; ticket: Ticket }[],
+): Promise<string[]> {
+  const db = getFirestore();
+  const freed: string[] = [];
+  const cancellingIds = new Set(cancelling.map((t) => t.id));
+  const packs = new Map<string, string>(); // packId -> typeId
+
+  for (const { ticket } of cancelling) {
+    if (ticket.packId) packs.set(ticket.packId, ticket.typeId);
+    else freed.push(ticket.typeId);
+  }
+
+  for (const [packId, typeId] of packs) {
+    const members = await tx.get(db.collection("tickets").where("packId", "==", packId));
+    const stillLive = members.docs.some(
+      (doc) => !cancellingIds.has(doc.id) && (doc.data() as Ticket).status !== "cancelled",
+    );
+    if (!stillLive) freed.push(typeId);
+  }
+
+  return freed;
 }

@@ -44,7 +44,13 @@ export const AUDIT_ACTIONS = {
   },
   "ticket.doorSale": {
     description: "Sold at the door",
-    details: z.object({ typeId: z.string(), price: z.int(), paymentMethod: z.enum(PAYMENT_METHODS) }),
+    // `price` is the type's: per ticket, or per whole pack for a pack's tickets (same `packId`)
+    details: z.object({
+      typeId: z.string(),
+      price: z.int(),
+      paymentMethod: z.enum(PAYMENT_METHODS),
+      packId: z.string().nullable().optional(),
+    }),
   },
   "ticket.checkin": {
     description: "Checked in at the door",

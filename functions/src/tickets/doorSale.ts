@@ -7,8 +7,8 @@ import { audit, auditedAs } from "../audit/audit";
 import { requireStaff, type Env } from "../auth";
 import { queueTicketEmails } from "../mail";
 import { bearerAuth, EmailSchema } from "../schemas";
-import { PAYMENT_METHODS, type TicketWrite } from "../types";
-import { reserveCapacity } from "./capacity";
+import { PAYMENT_METHODS, type TicketWrite, typeSettings } from "../types";
+import { packIds, reserveCapacity } from "./capacity";
 
 export const doorSale = new OpenAPIHono<Env>();
 
@@ -70,6 +70,7 @@ doorSale.openapi(doorSaleRoute, async (c) => {
   // One transaction so the capacity check and the tickets that consume it can't interleave
   const types = await db.runTransaction(async (tx) => {
     const reserved = await reserveCapacity(tx, items);
+    const packs = packIds(items, reserved);
 
     items.forEach((item, i) => {
       const type = reserved.get(item.typeId)!;
@@ -85,13 +86,15 @@ doorSale.openapi(doorSaleRoute, async (c) => {
         purchasedAt: FieldValue.serverTimestamp(),
         days: type.days,
         isLanParty: type.isLanParty,
+        singleEntry: typeSettings(type).singleEntry,
+        packId: packs[i],
         checkins: {},
       } satisfies TicketWrite);
       audit(tx, {
         actor: seller,
         action: "ticket.doorSale",
         target: { id: ticketRefs[i].id, label: item.holderName },
-        details: { typeId: item.typeId, price: type.price, paymentMethod },
+        details: { typeId: item.typeId, price: type.price, paymentMethod, packId: packs[i] },
       });
     });
 

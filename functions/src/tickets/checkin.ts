@@ -35,7 +35,8 @@ const checkinRoute = createRoute({
   tags: ["Tickets"],
   summary: "Check in a ticket at the door",
   description:
-    "Staff or admin. Uses the server's current event day (Europe/Madrid). " +
+    "Staff or admin. Uses the server's current event day (Europe/Madrid). A ticket allows one " +
+    "entry per day it covers, or one entry in total if its type is single-entry. " +
     "Always returns 200; the outcome is in `result`, so a retried scan never looks like a failure.",
   security: bearerAuth,
   ...auditedAs("ticket.checkin", "ticket.scanRejected"),
@@ -103,7 +104,10 @@ checkin.openapi(checkinRoute, async (c) => {
       return reject({ result: "wrong_day" as const, days: t.days });
     }
 
-    const existing = t.checkins?.[day];
+    // A single-entry ticket (e.g. kids, seniors) lets its holder in once, on any of its days
+    const existing = t.singleEntry
+      ? Object.values(t.checkins ?? {}).sort((a, b) => a.at.toMillis() - b.at.toMillis())[0]
+      : t.checkins?.[day];
     if (existing) {
       return reject({
         result: "already_used" as const,

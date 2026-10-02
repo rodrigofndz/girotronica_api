@@ -8,6 +8,14 @@ export type TicketStatus = (typeof TICKET_STATUSES)[number];
 export const PAYMENT_METHODS = ["stripe", "cash", "card_terminal"] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
+/** How the web groups ticket types: single tickets, LAN/Fighting, and season passes. */
+export const TICKET_CATEGORIES = ["general", "lan", "pack"] as const;
+export type TicketCategory = (typeof TICKET_CATEGORIES)[number];
+
+/** Which set of extras a ticket type offers; packs borrow one of the other two. */
+export const EXTRA_GROUPS = ["general", "lan"] as const;
+export type ExtraGroup = (typeof EXTRA_GROUPS)[number];
+
 export type UserProfile = {
   role: Role;
   email: string | null;
@@ -33,7 +41,25 @@ export type TicketType = {
   // Set by the Stripe sync; the price is Stripe's and only changes there
   stripeProductId?: string | null;
   stripePriceId?: string | null;
+  // Set by an admin; absent on types made before they existed, read through typeSettings()
+  category?: TicketCategory;
+  packSize?: number;       // one unit sold is this many tickets, one per person; capacity counts units
+  singleEntry?: boolean;   // one check-in in total, on any of its days, instead of one per day
+  extrasFrom?: ExtraGroup | null; // null: no extras offered
 };
+
+/** A type's admin settings with the defaults for types stored before the fields existed. */
+export function typeSettings(type: Pick<TicketType, "category" | "packSize" | "singleEntry" | "extrasFrom">) {
+  const category = type.category ?? "general";
+  return {
+    category,
+    packSize: type.packSize ?? 1,
+    singleEntry: type.singleEntry ?? false,
+    extrasFrom: type.extrasFrom !== undefined
+      ? type.extrasFrom
+      : (EXTRA_GROUPS as readonly string[]).includes(category) ? (category as ExtraGroup) : null,
+  };
+}
 
 export type CheckIn = {
   at: FirebaseFirestore.Timestamp;
@@ -55,6 +81,9 @@ export type Ticket = {
   days: string[];               // ISO dates (YYYY-MM-DD) this ticket grants access to,
                                  // denormalized from the ticket type at purchase time
   isLanParty: boolean;           // denormalized from the ticket type, for the member list query
+  // Denormalized from the type at sale time; absent on older tickets, meaning false / no pack
+  singleEntry?: boolean;
+  packId?: string | null;        // shared by the tickets of one pack unit
   checkins: Record<string, CheckIn>;  // keyed by ISO date
 };
 

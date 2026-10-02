@@ -160,7 +160,7 @@ stripeWebhook.post("/", async (c) => {
         } else {
           await db.runTransaction(async (tx) => {
             const docs = await tx.getAll(...snap.docs.map((d) => d.ref));
-            for (const { id, ticket } of cancelInTransaction(tx, docs)) {
+            for (const { id, ticket } of await cancelInTransaction(tx, docs)) {
               audit(tx, {
                 actor: STRIPE_ACTOR,
                 action: "ticket.refunded",
@@ -183,7 +183,7 @@ stripeWebhook.post("/", async (c) => {
         const docs = await tx.getAll(...ticketIds.map((id) => db.doc(`tickets/${id}`)));
         // Only slots still waiting for payment: a paid ticket must never be voided by an expiry
         const unpaid = docs.filter((doc) => (doc.data() as Ticket | undefined)?.status === "pending");
-        for (const { id, ticket } of cancelInTransaction(tx, unpaid)) {
+        for (const { id, ticket } of await cancelInTransaction(tx, unpaid)) {
           audit(tx, {
             actor: STRIPE_ACTOR,
             action: "ticket.expired",
