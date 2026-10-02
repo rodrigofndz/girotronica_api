@@ -1,4 +1,4 @@
-import { getFirestore } from "firebase-admin/firestore";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { apiFetch, createUser, resetEmulators, startApi, stopApi, type TestUser } from "./helpers";
@@ -70,13 +70,54 @@ describe("authentication", () => {
     expect((await profile(staff.uid))!.role).toBe("staff");
   });
 
-  it("updates the display name when it changes in the token", async () => {
-    const user = await createUser("renamed@example.com");
-    await fetch(`${AUTH}/accounts:update?key=fake`, {
+  const renameAccount = (token: string, displayName: string) =>
+    fetch(`${AUTH}/accounts:update?key=fake`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idToken: user.token, displayName: "New Name" }),
+      body: JSON.stringify({ idToken: token, displayName }),
     });
+
+  it("takes the sign-in name for a new profile, and returns it from /me", async () => {
+    const user = await createUser("named@example.com", "user", "Anna");
+
+    expect(await profile(user.uid)).toMatchObject({ displayName: "Anna", authName: "Anna" });
+    expect((await apiFetch("GET", "/me", { token: user.token })).body.displayName).toBe("Anna");
+  });
+
+  it("keeps a name set in Firestore while the sign-in name doesn't change", async () => {
+    const user = await createUser("kept@example.com", "user", "Anna");
+    await getFirestore().doc(`users/${user.uid}`).update({ displayName: "Anna (staff porta)" });
+
+    await apiFetch("GET", "/me", { token: user.token });
+    await apiFetch("GET", "/me", { token: await signIn("kept@example.com") });
+
+    expect((await profile(user.uid))!.displayName).toBe("Anna (staff porta)");
+  });
+
+  it("follows the sign-in name again once it changes, e.g. edited on the web", async () => {
+    const user = await createUser("edited@example.com", "user", "Anna");
+    await getFirestore().doc(`users/${user.uid}`).update({ displayName: "Set by hand" });
+    await renameAccount(user.token, "Anna Puig");
+
+    await apiFetch("GET", "/me", { token: await signIn("edited@example.com") });
+
+    expect(await profile(user.uid)).toMatchObject({ displayName: "Anna Puig", authName: "Anna Puig" });
+  });
+
+  it("keeps the name of a profile from before sign-in names were tracked", async () => {
+    const user = await createUser("legacy@example.com", "user", "Anna");
+    await getFirestore().doc(`users/${user.uid}`).update({
+      displayName: "Legacy Name", authName: FieldValue.delete(),
+    });
+
+    await apiFetch("GET", "/me", { token: user.token });
+
+    expect(await profile(user.uid)).toMatchObject({ displayName: "Legacy Name", authName: "Anna" });
+  });
+
+  it("updates the display name when it changes in the token", async () => {
+    const user = await createUser("renamed@example.com");
+    await renameAccount(user.token, "New Name");
 
     await apiFetch("GET", "/me", { token: await signIn("renamed@example.com") });
 
