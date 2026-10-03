@@ -39,7 +39,9 @@ const TicketTypeSchema = z.object({
   stripeProductId: z.string().nullable().openapi({ description: "The Stripe product it was synced from" }),
   category: z.enum(TICKET_CATEGORIES).openapi({ description: "How the web groups it" }),
   packSize: z.int().min(1).openapi({
-    description: "Tickets per unit sold, one per person; capacity, sold and remaining count units",
+    description:
+      "Tickets per unit sold, one per person; capacity, sold and remaining count units. " +
+      "From the Stripe product's metadata.packSize (default 1)",
   }),
   entries: z.enum(ENTRY_RULES).openapi({
     description: "once: one check-in in total, on any of its days (default). daily: one per day it covers",
@@ -57,7 +59,7 @@ const WINDOW_ORDER_MESSAGE = "salesStart must be before salesEnd";
 // Only checks the window when both ends are in the patch; the handler checks it against the stored type
 const UpdateSchema = TicketTypeSchema.pick({
   name: true, capacity: true, isLanParty: true, salesStart: true, salesEnd: true,
-  category: true, packSize: true, entries: true, extrasFrom: true,
+  category: true, entries: true, extrasFrom: true,
 })
   .extend({ days: z.array(isoDate).min(1) })
   .partial()
@@ -121,7 +123,7 @@ adminTicketTypes.openapi(
       "Admin only. The price can't be changed here: change it in Stripe and sync. " +
       "Capacity cannot go below what is already sold; set it equal to `sold` to stop sales. " +
       "Changing `days`, `isLanParty` or `entries` does not affect tickets already issued; " +
-      "`packSize` can't change once units are sold. " +
+      "Like the price, `packSize` comes from Stripe (metadata.packSize) and can't be set here. " +
       "Send null for `salesStart` or `salesEnd` to remove that bound.",
     security: bearerAuth,
     ...auditedAs("ticketType.update"),
@@ -138,7 +140,7 @@ adminTicketTypes.openapi(
       400: { description: "Invalid body, or the sale window would end before it starts" },
       403: { description: "Caller is not admin" },
       404: { description: "No such ticket type" },
-      409: { description: "Capacity is below the number already sold, or packSize changed after sales" },
+      409: { description: "Capacity is below the number already sold" },
     },
   }),
   async (c) => {
@@ -155,10 +157,6 @@ adminTicketTypes.openapi(
       }
 
       const sold = current.sold ?? 0;
-      // Stock is counted in units of packSize, so the size can't change under existing sales
-      if (patch.packSize !== undefined && patch.packSize !== typeSettings(current).packSize && sold > 0) {
-        throw new HTTPException(409, { message: `packSize can't change once units are sold (${sold})` });
-      }
       if (patch.capacity !== undefined && patch.capacity !== null && patch.capacity < sold) {
         throw new HTTPException(409, {
           message: `capacity ${patch.capacity} is below the ${sold} already sold`,

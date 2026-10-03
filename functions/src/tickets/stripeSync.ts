@@ -9,7 +9,7 @@ import { syncExtraProduct } from "../extras/sync";
 import { chargeablePrice, slugify } from "../stripeCatalogue";
 import { bearerAuth } from "../schemas";
 import { stripeSecretKey } from "../stripe";
-import type { TicketType } from "../types";
+import { type TicketType, typeSettings } from "../types";
 
 export const ticketTypeSync = new OpenAPIHono<Env>();
 
@@ -26,7 +26,9 @@ const ResultSchema = z.object({
   typeId: z.string().nullable().openapi({ description: "The ticket type, for kind ticketType" }),
   extraId: z.string().nullable().openapi({ description: "The extra, for kind extra" }),
   changes: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })),
-  reason: z.string().nullable().openapi({ description: "Why it was skipped" }),
+  reason: z.string().nullable().openapi({
+    description: "Why it was skipped, or for an update, something Stripe asked for that wasn't applied",
+  }),
 });
 export type SyncResult = z.infer<typeof ResultSchema>;
 type Result = SyncResult;
@@ -46,6 +48,13 @@ async function syncProduct(actor: User, product: Stripe.Product): Promise<Result
   const price = chargeablePrice(product);
   if (typeof price === "string") return skip(price);
   const amount = price.unit_amount!;
+
+  // People per unit sold, from the product's metadata like its price: "10" for a 10-person pack
+  const rawPackSize = product.metadata.packSize?.trim();
+  const packSize = rawPackSize ? Number(rawPackSize) : 1;
+  if (!Number.isInteger(packSize) || packSize < 1) {
+    return skip(`metadata.packSize must be a whole number of 1 or more, got "${rawPackSize}"`);
+  }
 
   const db = getFirestore();
 
@@ -77,7 +86,7 @@ async function syncProduct(actor: User, product: Stripe.Product): Promise<Result
         stripeProductId: product.id,
         stripePriceId: price.id,
         category: "general",
-        packSize: 1,
+        packSize,
         entries: "once",
         extrasFrom: "general",
       };
@@ -101,13 +110,24 @@ async function syncProduct(actor: User, product: Stripe.Product): Promise<Result
     if (current.price !== amount) changes.price = { from: current.price, to: amount };
     if (current.stripePriceId !== price.id) changes.stripePriceId = { from: current.stripePriceId ?? null, to: price.id };
     if (!current.name) changes.name = { from: current.name ?? null, to: product.name };
+
+    // Stock is counted in units of packSize, so it can't change under existing sales
+    const currentPackSize = typeSettings(current).packSize;
+    let note: string | null = null;
+    if (currentPackSize !== packSize) {
+      if (sold > 0) {
+        note = `metadata.packSize is ${packSize} but ${sold} units were sold as packs of ${currentPackSize}, so it stays ${currentPackSize}`;
+      } else {
+        changes.packSize = { from: currentPackSize, to: packSize };
+      }
+    }
     // Archived in Stripe: stop sales the documented way, without losing what was sold
     if (!product.active && (current.capacity === null || current.capacity > sold)) {
       changes.capacity = { from: current.capacity, to: sold };
     }
 
     if (Object.keys(changes).length === 0) {
-      return { ...base, result: "unchanged", typeId: doc.id };
+      return { ...base, result: "unchanged", typeId: doc.id, reason: note };
     }
 
     tx.update(doc.ref, Object.fromEntries(Object.entries(changes).map(([field, { to }]) => [field, to])));
@@ -117,7 +137,7 @@ async function syncProduct(actor: User, product: Stripe.Product): Promise<Result
       target: { id: doc.id, label: current.name || product.name },
       details: { stripeProductId: product.id, created: false, changes },
     });
-    return { ...base, result: "updated", typeId: doc.id, changes };
+    return { ...base, result: "updated", typeId: doc.id, changes, reason: note };
   });
 }
 
@@ -131,7 +151,8 @@ ticketTypeSync.openapi(
       "Admin only. Each Stripe product is one ticket type, priced by its default price, or an " +
       "extra if its metadata has kind = extra. " +
       "New products arrive not for sale (no days, capacity 0) until an admin completes them. " +
-      "Prices always follow Stripe; a name is only filled in when empty. " +
+      "Prices and pack sizes (metadata.packSize, default 1) always follow Stripe, except a pack " +
+      "size once units are sold; a name is only filled in when empty. " +
       "Products archived in Stripe stop selling. Safe to run as often as needed.",
     security: bearerAuth,
     ...auditedAs("ticketType.stripeSync", "extra.stripeSync"),
