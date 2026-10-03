@@ -181,8 +181,7 @@ export async function fetchQr(
 /** One person in an online purchase, as the web's form sends them. */
 export const attendee = (overrides: Record<string, unknown> = {}) => ({
   typeId: "general",
-  name: "Anna",
-  surname: "Puig",
+  name: "Anna Puig",
   email: "anna@example.com",
   birthDate: "1990-05-10",
   extras: [] as { extraId: string; option?: string }[],

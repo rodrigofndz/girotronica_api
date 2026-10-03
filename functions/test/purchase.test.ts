@@ -48,7 +48,7 @@ beforeEach(async () => {
 
 describe("buying without an account", () => {
   it("creates a pending order and returns Stripe's checkout url", async () => {
-    const res = await buyOnline([attendee(), attendee({ name: "Biel" })]);
+    const res = await buyOnline([attendee(), attendee({ name: "Biel Puig" })]);
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ orderId: expect.any(String), checkoutUrl: "https://checkout.stripe.test/cs_test_1" });
@@ -69,7 +69,7 @@ describe("buying without an account", () => {
     const [ticket] = await ticketsOf(res.body.orderId);
     expect(ticket).toMatchObject({
       holderEmail: "anna@example.com", orderId: res.body.orderId,
-      holder: { name: "Anna", surname: "Puig", birthDate: "1990-05-10", phone: "600000001", discord: "player" },
+      holder: { name: "Anna Puig", birthDate: "1990-05-10", phone: "600000001", discord: "player" },
     });
   });
 
@@ -271,7 +271,8 @@ describe("what each ticket needs", () => {
     ["more than 20 attendees", Array.from({ length: 21 }, () => attendee())],
     ["a birth date in the future", [attendee({ birthDate: "2999-01-01" })]],
     ["a birth date that isn't a date", [attendee({ birthDate: "10/05/1990" })]],
-    ["an attendee without a surname", [attendee({ surname: " " })]],
+    ["an attendee with a blank name", [attendee({ name: "  " })]],
+    ["a name over 200 characters", [attendee({ name: "x".repeat(201) })]],
     ["an invalid attendee email", [attendee({ email: "nope" })]],
   ])("refuses %s", async (_label, attendees) => {
     expect((await buyOnline(attendees)).status).toBe(400);

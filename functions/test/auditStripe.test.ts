@@ -60,7 +60,7 @@ describe("the online purchase", () => {
 
     const entries = await auditEntries("ticket.purchase");
 
-    expect(entries.map((e) => e.targetLabel).sort()).toEqual(["Anna Puig", "Biel Puig"]);
+    expect(entries.map((e) => e.targetLabel).sort()).toEqual(["Anna", "Biel"]);
     expect(entries[0]).toMatchObject({
       actorUid: buyer.uid, actorRole: "user",
       details: { typeId: "general", price: 900, orderId: expect.any(String), extras: [] },
