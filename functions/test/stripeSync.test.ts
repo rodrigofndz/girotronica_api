@@ -20,6 +20,7 @@ vi.mock("stripe", async (importOriginal) => {
 type FakeProduct = {
   id: string;
   name: string;
+  description?: string | null;
   active?: boolean;
   metadata?: Record<string, string>;
   default_price?: Record<string, unknown> | null;
@@ -63,6 +64,7 @@ describe("a new Stripe product", () => {
       name: "Pack de tres dies", price: 1300, capacity: 0, isLanParty: false, days: [], sold: 0,
       stripeProductId: "prod_pack", stripePriceId: "price_pack",
       category: "general", packSize: 1, entries: "once", extrasFrom: "general",
+      description: null, features: [], disclaimer: null,
     });
     const [listed] = (await apiFetch("GET", "/ticket-types")).body;
     expect(listed).toMatchObject({ onSale: false, stripeProductId: "prod_pack" });
@@ -149,6 +151,22 @@ describe("a product synced before", () => {
 
     expect(res.body.results[0].changes).toEqual({ capacity: { from: 50, to: 4 } });
     expect(await stored("pack")).toMatchObject({ capacity: 4, sold: 4 });
+  });
+});
+
+describe("shop card texts", () => {
+  it("fill the description from Stripe only while it's empty, and never the rest", async () => {
+    catalogue([{ id: "prod_pack", name: "Pack", description: "From Stripe", default_price: eur("price_pack", 1300) }]);
+    await sync();
+    expect(await stored("pack")).toMatchObject({ description: "From Stripe", features: [], disclaimer: null });
+
+    await apiFetch("PATCH", "/ticket-types/pack", {
+      token: admin.token, body: { description: "Edited", features: ["A"], disclaimer: "Small print" },
+    });
+    catalogue([{ id: "prod_pack", name: "Pack", description: "Changed in Stripe", default_price: eur("price_pack", 1300) }]);
+    await sync();
+
+    expect(await stored("pack")).toMatchObject({ description: "Edited", features: ["A"], disclaimer: "Small print" });
   });
 });
 

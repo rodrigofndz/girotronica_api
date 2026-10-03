@@ -77,6 +77,59 @@ describe("the catalogue fields", () => {
   });
 });
 
+describe("shop card texts", () => {
+  const edit = (body: Record<string, unknown>) =>
+    apiFetch("PATCH", "/ticket-types/entrada-divendres", { token: admin.token, body });
+
+  beforeEach(() => seedTicketType("entrada-divendres"));
+
+  it("are empty for types stored before they existed", async () => {
+    const [type] = (await apiFetch("GET", "/ticket-types")).body;
+
+    expect(type).toMatchObject({ description: null, features: [], disclaimer: null });
+  });
+
+  it("are set by an admin, trimmed, and shown publicly", async () => {
+    await edit({
+      description: "  Entrada per divendres ",
+      features: [" Accés al recinte ", "Concerts"],
+      disclaimer: "Aquesta entrada dóna accés un sol cop al recinte.",
+    });
+
+    const [type] = (await apiFetch("GET", "/ticket-types")).body;
+    expect(type).toMatchObject({
+      description: "Entrada per divendres",
+      features: ["Accés al recinte", "Concerts"],
+      disclaimer: "Aquesta entrada dóna accés un sol cop al recinte.",
+    });
+  });
+
+  it("clear with an empty string or list", async () => {
+    await edit({ description: "x", features: ["y"], disclaimer: "z" });
+
+    const res = await edit({ description: "  ", features: [], disclaimer: "" });
+
+    expect(res.body).toMatchObject({ description: null, features: [], disclaimer: null });
+  });
+
+  it("are logged like any other edit", async () => {
+    await edit({ features: ["Concerts"] });
+
+    expect((await auditEntries("ticketType.update"))[0].details.changes)
+      .toEqual({ features: { from: null, to: ["Concerts"] } });
+  });
+
+  it.each([
+    ["a description over 200 characters", { description: "x".repeat(201) }],
+    ["a feature over 300 characters", { features: ["x".repeat(301)] }],
+    ["an empty feature", { features: ["ok", " "] }],
+    ["more than 20 features", { features: Array.from({ length: 21 }, (_, i) => `f${i}`) }],
+    ["a disclaimer over 500 characters", { disclaimer: "x".repeat(501) }],
+  ])("refuse %s", async (_label, body) => {
+    expect((await edit(body)).status).toBe(400);
+  });
+});
+
 describe("selling packs", () => {
   beforeEach(() => seedTicketType("pack-10", { packSize: 3, capacity: 2, price: 9000 }));
 
