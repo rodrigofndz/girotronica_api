@@ -126,6 +126,7 @@ stripeWebhook.post("/", async (c) => {
               holderName: t.holderName,
               holderEmail: t.holderEmail,
               days: t.days,
+              extras: (t.extras ?? []).map((e) => ({ name: e.name, option: e.option })),
             })),
           );
         } catch (err) {

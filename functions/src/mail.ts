@@ -10,17 +10,24 @@ export type TicketEmail = {
   holderName: string;
   holderEmail: string;
   days: string[];
+  extras?: { name: string; option: string | null }[];
 };
 
 // The holder's name is typed by the buyer, and the buyer also picks where the mail goes
 const escapeHtml = (text: string) =>
   text.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 
+/** "Samarreta (M), Gymsack": what was bought with the ticket, to collect at the event. */
+const extrasLine = (t: TicketEmail) =>
+  (t.extras ?? []).length === 0
+    ? ""
+    : "<br>Extres: " + t.extras!.map((e) => escapeHtml(e.option ? `${e.name} (${e.option})` : e.name)).join(", ");
+
 function html(tickets: TicketEmail[]): string {
   const items = tickets
     .map(
       (t) =>
-        `<li><strong>${escapeHtml(t.holderName)}</strong> — ${t.days.join(", ")}<br>` +
+        `<li><strong>${escapeHtml(t.holderName)}</strong> — ${t.days.join(", ")}${extrasLine(t)}<br>` +
         `<img src="cid:qr-${t.code}" alt="Codi QR" width="200"></li>`,
     )
     .join("");
