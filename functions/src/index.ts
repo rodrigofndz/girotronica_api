@@ -113,6 +113,9 @@ app.openapi(
   (c) => c.json({ ok: true }, 200),
 );
 
+// Sends what the API queues in the `mail` collection
+export { sendMail } from "./mailSender";
+
 export const api = onRequest(
   { region: "europe-west1", maxInstances: 10, secrets: stripeSecrets },
   getRequestListener(app.fetch),

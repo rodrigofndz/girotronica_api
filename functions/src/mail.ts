@@ -2,8 +2,19 @@ import { getFirestore } from "firebase-admin/firestore";
 
 import { qrPng } from "./tickets/qr";
 
-// Watched by the Firebase "Trigger Email" extension; writing a doc here is what sends the mail
-const COLLECTION = "mail";
+// Watched by sendMail (mailSender.ts); writing a doc here is what sends the mail
+export const MAIL_COLLECTION = "mail";
+
+/** A queued email, in the format the old Trigger Email extension used. */
+export type MailDoc = {
+  to: string[];
+  message: {
+    subject: string;
+    text: string;
+    html: string;
+    attachments?: { filename: string; content: string; encoding: string; contentType: string; cid: string }[];
+  };
+};
 
 export type TicketEmail = {
   code: string;
@@ -66,7 +77,7 @@ export async function queueTicketEmails(tickets: TicketEmail[]): Promise<void> {
       })),
     );
 
-    batch.set(db.collection(COLLECTION).doc(), {
+    batch.set(db.collection(MAIL_COLLECTION).doc(), {
       to: [holderEmail],
       message: {
         subject:
@@ -80,7 +91,7 @@ export async function queueTicketEmails(tickets: TicketEmail[]): Promise<void> {
         html: html(group),
         attachments,
       },
-    });
+    } satisfies MailDoc);
   }
 
   await batch.commit();
