@@ -19,7 +19,8 @@ const isoDateTime = z.iso
 // firestore.indexes.json cover in both orders, alone or combined
 const QuerySchema = z.object({
   actor: z.string().min(1).optional().openapi({ description: "Uid of who did it" }),
-  role: z.enum([...ROLES, STRIPE_ACTOR.role]).optional().openapi({ description: "Their role at the time" }),
+  role: z.enum([...ROLES, STRIPE_ACTOR.role, "guest"]).optional()
+    .openapi({ description: "Their role at the time; guest for purchases without an account" }),
   action: z.enum(AUDIT_ACTION_NAMES).optional(),
   targetType: z.enum(AUDIT_TARGETS).optional(),
   target: z.string().min(1).optional().openapi({ description: "Id of the ticket, ticket type or user acted on" }),
@@ -39,7 +40,7 @@ const EntrySchema = z.object({
   targetLabel: z.string().nullable(),
   actorUid: z.string().nullable(),
   actorEmail: z.string().nullable(),
-  actorRole: z.enum([...ROLES, STRIPE_ACTOR.role]),
+  actorRole: z.enum([...ROLES, STRIPE_ACTOR.role, "guest"]),
   details: z.record(z.string(), z.unknown()),
 });
 

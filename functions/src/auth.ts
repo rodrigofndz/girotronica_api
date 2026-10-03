@@ -11,11 +11,34 @@ export type Env = { Variables: { user: User } };
 
 const ALREADY_EXISTS = 6;
 
+/** For routes open to guests: a signed-in caller is optional, and `user` is unset without one. */
+export type GuestEnv = { Variables: { user?: User } };
+
 export const requireAuth = createMiddleware<Env>(async (c, next) => {
   const header = c.req.header("Authorization");
   if (!header?.startsWith("Bearer ")) {
     throw new HTTPException(401, { message: "missing bearer token" });
   }
+  c.set("user", await authenticate(header));
+  await next();
+});
+
+/**
+ * Signs the caller in when they send a token, exactly as requireAuth does (a bad token is
+ * still a 401 and a suspended account a 403), and lets them through as a guest when they don't.
+ */
+export const optionalAuth = createMiddleware<GuestEnv>(async (c, next) => {
+  const header = c.req.header("Authorization");
+  if (header !== undefined) {
+    if (!header.startsWith("Bearer ")) {
+      throw new HTTPException(401, { message: "malformed authorization header" });
+    }
+    c.set("user", await authenticate(header));
+  }
+  await next();
+});
+
+async function authenticate(header: string): Promise<User> {
 
   let decoded;
   try {
@@ -74,15 +97,13 @@ export const requireAuth = createMiddleware<Env>(async (c, next) => {
     }
   }
 
-  c.set("user", {
+  return {
     uid: decoded.uid,
     email: email ?? undefined,
     displayName: displayName ?? null,
     role: profile?.role ?? "user",
-  });
-
-  await next();
-});
+  };
+}
 
 const requireRole = (...roles: Role[]) =>
   createMiddleware<Env>(async (c, next) => {

@@ -77,8 +77,14 @@ export const AUDIT_ACTIONS = {
     details: z.object({ previousStatus: z.enum(TICKET_STATUSES) }),
   },
   "ticket.purchase": {
-    description: "Bought online; waiting for payment",
-    details: z.object({ typeId: z.string(), price: z.int() }),
+    description: "Bought online; waiting for payment, or active at once when the order is free",
+    // `price` is the type's (per ticket, or per whole pack); orderId and extras since guest orders
+    details: z.object({
+      typeId: z.string(),
+      price: z.int(),
+      orderId: z.string().optional(),
+      extras: z.array(z.string()).optional(),
+    }),
   },
   "ticket.checkoutFailed": {
     description: "Online purchase dropped because Stripe checkout could not be started",
@@ -126,8 +132,11 @@ export const AUDIT_ACTION_NAMES = Object.keys(AUDIT_ACTIONS) as [AuditAction, ..
 /** Stripe acts through the webhook; which event did it is in the entry's details. */
 export const STRIPE_ACTOR = { uid: null, email: null, role: "stripe" } as const;
 
-export type AuditActor = User | typeof STRIPE_ACTOR;
-export type AuditActorRole = Role | typeof STRIPE_ACTOR.role;
+/** Someone buying without an account, known only by the email they gave. */
+export const guestActor = (email: string) => ({ uid: null, email, role: "guest" as const });
+
+export type AuditActor = User | typeof STRIPE_ACTOR | ReturnType<typeof guestActor>;
+export type AuditActorRole = Role | typeof STRIPE_ACTOR.role | "guest";
 
 export type AuditEntry = {
   at: FirebaseFirestore.Timestamp;

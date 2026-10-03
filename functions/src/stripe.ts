@@ -1,4 +1,4 @@
-import { getFirestore } from "firebase-admin/firestore";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -8,7 +8,7 @@ import { audit, AUDIT_COLLECTION, STRIPE_ACTOR } from "./audit/audit";
 import { ONLINE_SALES } from "./features";
 import { queueTicketEmails } from "./mail";
 import { cancelInTransaction } from "./tickets/cancel";
-import type { Ticket, TicketWrite } from "./types";
+import type { Order, OrderWrite, Ticket, TicketWrite } from "./types";
 
 // The API key is always needed: the catalogue sync reads products even while online sales
 // are off. The webhook secret is declared only with online sales, because the deploy fails
@@ -42,6 +42,21 @@ function ticketIdsFromSession(session: Stripe.Checkout.Session): string[] {
   }
 }
 
+/**
+ * The order a checkout belongs to and its tickets. Checkouts from before orders existed
+ * carry the ticket ids themselves and have no order.
+ */
+async function orderOfSession(
+  tx: FirebaseFirestore.Transaction,
+  session: Stripe.Checkout.Session,
+): Promise<{ order: FirebaseFirestore.DocumentSnapshot | null; ticketIds: string[] }> {
+  const orderId = session.metadata?.orderId;
+  if (!orderId) return { order: null, ticketIds: ticketIdsFromSession(session) };
+
+  const order = await tx.get(getFirestore().doc(`orders/${orderId}`));
+  return { order, ticketIds: order.exists ? (order.data() as Order).ticketIds : [] };
+}
+
 stripeWebhook.post("/", async (c) => {
   const signature = c.req.header("stripe-signature");
   if (!signature) {
@@ -62,55 +77,59 @@ stripeWebhook.post("/", async (c) => {
     const session = event.data.object as Stripe.Checkout.Session;
 
     if (session.payment_status !== "unpaid") {
-      const ticketIds = ticketIdsFromSession(session);
       const db = getFirestore();
+      // Recorded so a later refund can find the tickets this payment bought
+      const paymentIntentId =
+        typeof session.payment_intent === "string"
+          ? session.payment_intent
+          : (session.payment_intent?.id ?? null);
 
-      if (ticketIds.length > 0) {
-        // Recorded so a later refund can find the tickets this payment bought
-        const paymentIntentId =
-          typeof session.payment_intent === "string"
-            ? session.payment_intent
-            : (session.payment_intent?.id ?? null);
+      const activated = await db.runTransaction(async (tx) => {
+        const { order, ticketIds } = await orderOfSession(tx, session);
+        const docs = ticketIds.length > 0
+          ? await tx.getAll(...ticketIds.map((id) => db.doc(`tickets/${id}`)))
+          : [];
+        const justActivated: Ticket[] = [];
 
-        const activated = await db.runTransaction(async (tx) => {
-          const refs = ticketIds.map((id) => db.doc(`tickets/${id}`));
-          const docs = await tx.getAll(...refs);
-          const justActivated: Ticket[] = [];
+        if (order?.exists && (order.data() as Order).status !== "paid") {
+          tx.update(order.ref, {
+            status: "paid", paymentIntentId, paidAt: FieldValue.serverTimestamp(),
+          } satisfies Partial<OrderWrite>);
+        }
 
-          for (const doc of docs) {
-            const ticket = doc.data() as Ticket | undefined;
-            if (doc.exists && ticket?.status === "pending") {
-              tx.update(doc.ref, {
-                status: "active",
-                paymentIntentId,
-              } satisfies Partial<TicketWrite>);
-              audit(tx, {
-                actor: STRIPE_ACTOR,
-                action: "ticket.paid",
-                target: { id: doc.id, label: ticket.holderName },
-                details: { stripeEventId: event.id, paymentIntentId },
-              });
-              justActivated.push(ticket);
-            }
+        for (const doc of docs) {
+          const ticket = doc.data() as Ticket | undefined;
+          if (doc.exists && ticket?.status === "pending") {
+            tx.update(doc.ref, {
+              status: "active",
+              paymentIntentId,
+            } satisfies Partial<TicketWrite>);
+            audit(tx, {
+              actor: STRIPE_ACTOR,
+              action: "ticket.paid",
+              target: { id: doc.id, label: ticket.holderName },
+              details: { stripeEventId: event.id, paymentIntentId },
+            });
+            justActivated.push(ticket);
           }
+        }
 
-          return justActivated;
-        });
+        return justActivated;
+      });
 
-        // Only the tickets this delivery activated, so a Stripe retry can't send them twice
-        if (activated.length > 0) {
-          try {
-            await queueTicketEmails(
-              activated.map((t) => ({
-                code: t.code,
-                holderName: t.holderName,
-                holderEmail: t.holderEmail,
-                days: t.days,
-              })),
-            );
-          } catch (err) {
-            console.error("failed to queue purchase ticket email", err);
-          }
+      // Only the tickets this delivery activated, so a Stripe retry can't send them twice
+      if (activated.length > 0) {
+        try {
+          await queueTicketEmails(
+            activated.map((t) => ({
+              code: t.code,
+              holderName: t.holderName,
+              holderEmail: t.holderEmail,
+              days: t.days,
+            })),
+          );
+        } catch (err) {
+          console.error("failed to queue purchase ticket email", err);
         }
       }
     }
@@ -175,24 +194,29 @@ stripeWebhook.post("/", async (c) => {
   }
 
   if (event.type === "checkout.session.expired") {
-    const ticketIds = ticketIdsFromSession(event.data.object as Stripe.Checkout.Session);
+    const session = event.data.object as Stripe.Checkout.Session;
+    const db = getFirestore();
 
-    if (ticketIds.length > 0) {
-      const db = getFirestore();
-      await db.runTransaction(async (tx) => {
-        const docs = await tx.getAll(...ticketIds.map((id) => db.doc(`tickets/${id}`)));
-        // Only slots still waiting for payment: a paid ticket must never be voided by an expiry
-        const unpaid = docs.filter((doc) => (doc.data() as Ticket | undefined)?.status === "pending");
-        for (const { id, ticket } of await cancelInTransaction(tx, unpaid)) {
-          audit(tx, {
-            actor: STRIPE_ACTOR,
-            action: "ticket.expired",
-            target: { id, label: ticket.holderName },
-            details: { stripeEventId: event.id },
-          });
-        }
-      });
-    }
+    await db.runTransaction(async (tx) => {
+      const { order, ticketIds } = await orderOfSession(tx, session);
+      const docs = ticketIds.length > 0
+        ? await tx.getAll(...ticketIds.map((id) => db.doc(`tickets/${id}`)))
+        : [];
+      // Only slots still waiting for payment: a paid ticket must never be voided by an expiry
+      const unpaid = docs.filter((doc) => (doc.data() as Ticket | undefined)?.status === "pending");
+      const cancelled = await cancelInTransaction(tx, unpaid);
+      if (order?.exists && (order.data() as Order).status === "pending") {
+        tx.update(order.ref, { status: "expired" } satisfies Partial<OrderWrite>);
+      }
+      for (const { id, ticket } of cancelled) {
+        audit(tx, {
+          actor: STRIPE_ACTOR,
+          action: "ticket.expired",
+          target: { id, label: ticket.holderName },
+          details: { stripeEventId: event.id },
+        });
+      }
+    });
   }
 
   return c.json({ received: true });

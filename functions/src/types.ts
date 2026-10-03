@@ -115,6 +115,47 @@ export type Ticket = {
   entries?: EntryRule;           // absent on older tickets: "once"
   packId?: string | null;        // shared by the tickets of one pack unit
   checkins: Record<string, CheckIn>;  // keyed by ISO date
+  // Set on tickets bought through an order (online); absent on door sales and older tickets
+  orderId?: string;
+  holder?: TicketHolder;
+  extras?: TicketExtra[];
+};
+
+/** The attendee's details from the purchase form. */
+export type TicketHolder = {
+  name: string;
+  surname: string;
+  birthDate: string;          // YYYY-MM-DD
+  phone: string | null;       // only asked for LAN-group tickets
+  discord: string | null;     // only asked for LAN-group tickets, optional
+};
+
+/** An extra bought with a ticket, as it was at purchase time. */
+export type TicketExtra = {
+  extraId: string;
+  name: string;
+  option: string | null;
+  price: number;              // cents
+};
+
+export const ORDER_STATUSES = ["pending", "paid", "expired"] as const;
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
+
+/**
+ * One online purchase: who paid and the tickets it created. Its id is unguessable and is what
+ * the buyer's confirmation page uses, so a guest needs no account to see what they bought.
+ */
+export type Order = {
+  id: string;
+  status: OrderStatus;          // a free order is paid as soon as it's created
+  buyer: { name: string; email: string; newsletter: boolean };
+  uid: string | null;           // the buyer's account, when they bought signed in
+  ticketIds: string[];
+  total: number;                // cents
+  stripeSessionId: string | null;
+  paymentIntentId: string | null;
+  createdAt: FirebaseFirestore.Timestamp;
+  paidAt: FirebaseFirestore.Timestamp | null;
 };
 
 /** A stored type as it is written: timestamps may be serverTimestamp() sentinels. */
@@ -127,3 +168,5 @@ type Written<T> = {
 export type TicketWrite = Omit<Written<Ticket>, "id">;
 
 export type UserProfileWrite = Written<UserProfile>;
+
+export type OrderWrite = Omit<Written<Order>, "id">;

@@ -6,13 +6,14 @@ import { audit, auditedAs } from "../audit/audit";
 import { requireAdmin, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
 import type { Ticket, TicketWrite } from "../types";
+import { releaseExtras } from "../extras/stock";
 import { releaseCapacity, unitsFreedBy } from "./capacity";
 
 export const ticketCancel = new OpenAPIHono<Env>();
 
 /**
  * Cancels the tickets that are still live and frees their slots: a single ticket's at once,
- * a pack's only when its last ticket goes. Already cancelled ones are skipped so repeating
+ * a pack's only when its last ticket goes. The extras bought with them go back to stock. Already cancelled ones are skipped so repeating
  * this (a Stripe retry, a second click) changes nothing. Reads before it writes, so call it
  * before anything else in the transaction writes. Returns the tickets it actually
  * cancelled, as they were before, so callers can log them.
@@ -34,6 +35,7 @@ export async function cancelInTransaction(
     tx.update(ref, { status: "cancelled" } satisfies Partial<TicketWrite>);
   }
   releaseCapacity(tx, freed);
+  releaseExtras(tx, live.map(({ ticket }) => ticket));
 
   return live.map(({ id, ticket }) => ({ id, ticket }));
 }

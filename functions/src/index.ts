@@ -19,7 +19,9 @@ import { ticketCancel } from "./tickets/cancel";
 import { ticketQr } from "./tickets/qr";
 import { ticketTypeSync } from "./tickets/stripeSync";
 import { adminTicketTypes, ticketTypes } from "./tickets/ticketTypes";
-import { ticketPurchase, tickets } from "./tickets/tickets";
+import { tickets } from "./tickets/tickets";
+import { orders } from "./orders/routes";
+import { purchase } from "./orders/purchase";
 import { lanParty } from "./users/lanParty";
 import { me } from "./users/me";
 import { userLookup } from "./users/lookup";
@@ -68,6 +70,9 @@ app.openapi(
 
 if (ONLINE_SALES) {
   app.route("/stripe/webhook", stripeWebhook);
+  // Open to guests, so mounted before requireAuth; signs the buyer in only if they send a token
+  app.route("/tickets", purchase);
+  app.route("/orders", orders);
 }
 app.route("/ticket-types", ticketTypes);
 app.route("/extras", extras);
@@ -81,9 +86,6 @@ app.route("/extras", adminExtras);
 app.route("/me", me);
 
 app.route("/tickets", tickets);
-if (ONLINE_SALES) {
-  app.route("/tickets", ticketPurchase);
-}
 app.route("/tickets/checkin", checkin);
 app.route("/tickets/door", doorSale);
 app.route("/tickets/by-email", ticketLookup);
