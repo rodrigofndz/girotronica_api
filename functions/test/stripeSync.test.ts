@@ -152,6 +152,59 @@ describe("a product synced before", () => {
   });
 });
 
+describe("pack sizes from Stripe", () => {
+  const pack = (packSize?: string, price = 35000) =>
+    catalogue([{
+      id: "prod_pack10", name: "Pack 10 LAN Party", default_price: eur("price_pack10", price),
+      metadata: { typeId: "pack-10-lan-party", ...(packSize === undefined ? {} : { packSize }) },
+    }]);
+
+  it("takes the pack size from metadata.packSize, or 1 without it", async () => {
+    pack("10");
+    await sync();
+    catalogue([{ id: "prod_single", name: "Entrada LAN", default_price: eur("price_single", 3500) }]);
+    await sync();
+
+    expect((await stored("pack-10-lan-party"))!.packSize).toBe(10);
+    expect((await stored("entrada-lan"))!.packSize).toBe(1);
+  });
+
+  it("follows a change in Stripe while nothing is sold", async () => {
+    pack("10");
+    await sync();
+    pack("8");
+
+    const res = await sync();
+
+    expect(res.body.results[0]).toMatchObject({ result: "updated", changes: { packSize: { from: 10, to: 8 } }, reason: null });
+  });
+
+  it("keeps the size once packs are sold, saying why, but still takes the new price", async () => {
+    pack("10");
+    await sync();
+    await getFirestore().doc("ticketTypes/pack-10-lan-party").update({ sold: 2 });
+    pack("8", 30000);
+
+    const res = await sync();
+
+    expect(res.body.results[0]).toMatchObject({
+      result: "updated", changes: { price: { from: 35000, to: 30000 } },
+      reason: "metadata.packSize is 8 but 2 units were sold as packs of 10, so it stays 10",
+    });
+    expect((await stored("pack-10-lan-party"))!.packSize).toBe(10);
+  });
+
+  it.each(["0", "2.5", "ten"])("skips a product whose packSize is %s", async (value) => {
+    pack(value);
+
+    const res = await sync();
+
+    expect(res.body.results[0]).toMatchObject({
+      result: "skipped", reason: `metadata.packSize must be a whole number of 1 or more, got "${value}"`,
+    });
+  });
+});
+
 describe("products it can't use", () => {
   it("skips them with the reason, and changes nothing for them", async () => {
     await seedTicketType("taken");

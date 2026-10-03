@@ -50,23 +50,23 @@ describe("the catalogue fields", () => {
 
     const res = await apiFetch("PATCH", "/ticket-types/pack-10-lan-party", {
       token: admin.token,
-      body: { category: "pack", packSize: 10, entries: "daily", extrasFrom: "lan" },
+      body: { category: "pack", entries: "daily", extrasFrom: "lan" },
     });
 
-    expect(res.body).toMatchObject({ category: "pack", packSize: 10, entries: "daily", extrasFrom: "lan" });
+    expect(res.body).toMatchObject({ category: "pack", packSize: 1, entries: "daily", extrasFrom: "lan" });
   });
 
-  it("refuses changing the pack size once units are sold", async () => {
-    await seedTicketType("pack", { packSize: 10, sold: 1 });
+  // It comes from the Stripe product's metadata, like the price
+  it("refuses setting the pack size by hand", async () => {
+    await seedTicketType("pack");
 
-    const res = await apiFetch("PATCH", "/ticket-types/pack", { token: admin.token, body: { packSize: 5 } });
+    const res = await apiFetch("PATCH", "/ticket-types/pack", { token: admin.token, body: { packSize: 10 } });
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(400);
   });
 
   it.each([
     ["an unknown category", { category: "vip" }],
-    ["a pack of zero", { packSize: 0 }],
     ["an unknown extras group", { extrasFrom: "pack" }],
     ["an unknown entries rule", { entries: "twice" }],
     ["the old singleEntry flag", { singleEntry: true }],
