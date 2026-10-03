@@ -47,7 +47,14 @@ const TicketTypeSchema = z.object({
     description: "once: one check-in in total, on any of its days (default). daily: one per day it covers",
   }),
   extrasFrom: z.enum(EXTRA_GROUPS).nullable().openapi({ description: "Which extras it offers; null for none" }),
+  description: z.string().nullable().openapi({ description: "Shop card: short line under the title" }),
+  features: z.array(z.string()).openapi({ description: "Shop card: the \"Més informació\" bullet list" }),
+  disclaimer: z.string().nullable().openapi({ description: "Shop card: small print under the card" }),
 });
+
+/** Trimmed; an empty string means "no text" (null). */
+const optionalText = (max: number) =>
+  z.string().trim().max(max).nullable().transform((value) => value || null);
 
 const windowInOrder = (type: { salesStart?: string | null; salesEnd?: string | null }) =>
   !type.salesStart || !type.salesEnd || type.salesStart < type.salesEnd;
@@ -61,7 +68,12 @@ const UpdateSchema = TicketTypeSchema.pick({
   name: true, capacity: true, isLanParty: true, salesStart: true, salesEnd: true,
   category: true, entries: true, extrasFrom: true,
 })
-  .extend({ days: z.array(isoDate).min(1) })
+  .extend({
+    days: z.array(isoDate).min(1),
+    description: optionalText(200),
+    features: z.array(z.string().trim().min(1).max(300)).max(20),
+    disclaimer: optionalText(500),
+  })
   .partial()
   .strict();
 
@@ -85,6 +97,9 @@ function present(id: string, type: Omit<TicketType, "id">) {
     onSale: isOnSale(type),
     stripeProductId: type.stripeProductId ?? null,
     ...typeSettings(type),
+    description: type.description ?? null,
+    features: type.features ?? [],
+    disclaimer: type.disclaimer ?? null,
   };
 }
 

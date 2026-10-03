@@ -76,6 +76,10 @@ export type TicketType = {
   packSize?: number;       // one unit sold is this many tickets, one per person; capacity counts units
   entries?: EntryRule;
   extrasFrom?: ExtraGroup | null; // null: no extras offered
+  // Shop card texts, edited in the admin; absent on older types (null / [])
+  description?: string | null;   // short line under the title
+  features?: string[];           // the "+ Més informació" bullet list
+  disclaimer?: string | null;    // small print under the card
 };
 
 /** A type's admin settings with the defaults for types stored before the fields existed. */

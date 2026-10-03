@@ -89,6 +89,9 @@ async function syncProduct(actor: User, product: Stripe.Product): Promise<Result
         packSize,
         entries: "once",
         extrasFrom: "general",
+        description: product.description ?? null,
+        features: [],
+        disclaimer: null,
       };
       const changes = Object.fromEntries(Object.entries(type).map(([field, to]) => [field, { from: null, to }]));
 
@@ -110,6 +113,9 @@ async function syncProduct(actor: User, product: Stripe.Product): Promise<Result
     if (current.price !== amount) changes.price = { from: current.price, to: amount };
     if (current.stripePriceId !== price.id) changes.stripePriceId = { from: current.stripePriceId ?? null, to: price.id };
     if (!current.name) changes.name = { from: current.name ?? null, to: product.name };
+    if (!current.description && product.description) {
+      changes.description = { from: current.description ?? null, to: product.description };
+    }
 
     // Stock is counted in units of packSize, so it can't change under existing sales
     const currentPackSize = typeSettings(current).packSize;
@@ -152,7 +158,7 @@ ticketTypeSync.openapi(
       "extra if its metadata has kind = extra. " +
       "New products arrive not for sale (no days, capacity 0) until an admin completes them. " +
       "Prices and pack sizes (metadata.packSize, default 1) always follow Stripe, except a pack " +
-      "size once units are sold; a name is only filled in when empty. " +
+      "size once units are sold; a name and description are only filled in when empty. " +
       "Products archived in Stripe stop selling. Safe to run as often as needed.",
     security: bearerAuth,
     ...auditedAs("ticketType.stripeSync", "extra.stripeSync"),
