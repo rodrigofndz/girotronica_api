@@ -28,8 +28,7 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be an ISO date (YY
 
 const AttendeeSchema = z.object({
   typeId: z.string().min(1),
-  name: z.string().trim().min(1).max(100),
-  surname: z.string().trim().min(1).max(100),
+  name: z.string().trim().min(1).max(200).openapi({ description: "Full name (nom i cognoms)" }),
   email: EmailSchema,
   birthDate: isoDate,
   phone: z.string().trim().min(6).max(20).optional().openapi({ description: "Required for LAN-group tickets" }),
@@ -152,7 +151,7 @@ purchase.openapi(
           typeId: a.typeId,
           status: "pending",
           code: randomUUID(),
-          holderName: `${a.name} ${a.surname}`,
+          holderName: a.name,
           holderEmail: a.email,
           paymentMethod: "stripe",
           soldBy: null,
@@ -165,7 +164,6 @@ purchase.openapi(
           orderId: orderRef.id,
           holder: {
             name: a.name,
-            surname: a.surname,
             birthDate: a.birthDate,
             phone: lan ? a.phone ?? null : null,
             discord: lan ? a.discord || null : null,

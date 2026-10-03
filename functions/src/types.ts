@@ -123,8 +123,7 @@ export type Ticket = {
 
 /** The attendee's details from the purchase form. */
 export type TicketHolder = {
-  name: string;
-  surname: string;
+  name: string;               // full name, as one field
   birthDate: string;          // YYYY-MM-DD
   phone: string | null;       // only asked for LAN-group tickets
   discord: string | null;     // only asked for LAN-group tickets, optional
