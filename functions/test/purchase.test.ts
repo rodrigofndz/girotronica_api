@@ -328,6 +328,22 @@ describe("Stripe's answers about an order", () => {
     expect((await mailDocs()).map((m) => m.to[0]).sort()).toEqual(["a@example.com", "b@example.com"]);
   });
 
+  it("lists each attendee's extras in their email", async () => {
+    await seedExtra("samarreta", { name: "Samarreta", options: ["M"] });
+    await seedExtra("gymsack", { name: "Gymsack" });
+    const res = await buyOnline([
+      attendee({ email: "a@example.com", extras: [{ extraId: "samarreta", option: "M" }, { extraId: "gymsack" }] }),
+      attendee({ email: "b@example.com" }),
+    ]);
+
+    await sendStripeEvent("checkout.session.completed", paid(res.body.orderId));
+
+    const mail = await mailDocs();
+    const to = (email: string) => mail.find((m) => m.to[0] === email).message.html as string;
+    expect(to("a@example.com")).toContain("Extres: Samarreta (M), Gymsack");
+    expect(to("b@example.com")).not.toContain("Extres");
+  });
+
   it("expires the order, giving back its places and extras", async () => {
     await seedExtra("samarreta", { capacity: 5 });
     const res = await buyOnline([attendee({ extras: [{ extraId: "samarreta" }] })]);
