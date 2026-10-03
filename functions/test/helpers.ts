@@ -177,3 +177,40 @@ export async function fetchQr(
     decoded,
   };
 }
+
+/** One person in an online purchase, as the web's form sends them. */
+export const attendee = (overrides: Record<string, unknown> = {}) => ({
+  typeId: "general",
+  name: "Anna",
+  surname: "Puig",
+  email: "anna@example.com",
+  birthDate: "1990-05-10",
+  extras: [] as { extraId: string; option?: string }[],
+  ...overrides,
+});
+
+export const buyerDetails = { name: "Buyer Person", email: "buyer@example.com", newsletter: false };
+
+/** POST /tickets, as a guest unless a token is given. */
+export const buyOnline = (
+  attendees: Record<string, unknown>[],
+  options: { token?: string; buyer?: Record<string, unknown>; headers?: Record<string, string> } = {},
+) =>
+  apiFetch("POST", "/tickets", {
+    token: options.token,
+    headers: options.headers,
+    body: { buyer: options.buyer ?? buyerDetails, attendees },
+  });
+
+export async function seedExtra(id: string, overrides: Record<string, unknown> = {}): Promise<void> {
+  await getFirestore().doc(`extras/${id}`).set({
+    name: id, description: null, price: 1500, options: [], consent: null, groups: ["general"],
+    capacity: null, sold: 0, stripeProductId: `prod_${id}`, stripePriceId: `price_${id}`,
+    ...overrides,
+  });
+}
+
+export const extraSold = async (id: string): Promise<number> =>
+  (await getFirestore().doc(`extras/${id}`).get()).data()?.sold ?? 0;
+
+export const orderDoc = async (id: string) => (await getFirestore().doc(`orders/${id}`).get()).data();

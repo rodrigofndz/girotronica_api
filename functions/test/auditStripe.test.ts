@@ -2,7 +2,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  apiFetch, auditEntries, checkoutSession, createUser, resetEmulators, seedTicketType, sendStripeEvent,
+  attendee, auditEntries, buyOnline, checkoutSession, createUser, resetEmulators, seedTicketType, sendStripeEvent,
   startApi, stopApi, type TestUser,
 } from "./helpers";
 
@@ -22,11 +22,8 @@ vi.mock("stripe", async (importOriginal) => {
 
 let buyer: TestUser;
 
-const buy = (holders: string[]) =>
-  apiFetch("POST", "/tickets", {
-    token: buyer.token,
-    body: { items: holders.map((holderName) => ({ typeId: "general", holderName, holderEmail: "h@example.com" })) },
-  });
+const buy = (names: string[], as: "member" | "guest" = "member") =>
+  buyOnline(names.map((name) => attendee({ name })), { token: as === "member" ? buyer.token : undefined });
 
 const pendingTicketIds = async () =>
   (await getFirestore().collection("tickets").where("status", "==", "pending").get()).docs.map((d) => d.id);
@@ -63,9 +60,18 @@ describe("the online purchase", () => {
 
     const entries = await auditEntries("ticket.purchase");
 
-    expect(entries.map((e) => e.targetLabel).sort()).toEqual(["Anna", "Biel"]);
+    expect(entries.map((e) => e.targetLabel).sort()).toEqual(["Anna Puig", "Biel Puig"]);
     expect(entries[0]).toMatchObject({
-      actorUid: buyer.uid, actorRole: "user", details: { typeId: "general", price: 900 },
+      actorUid: buyer.uid, actorRole: "user",
+      details: { typeId: "general", price: 900, orderId: expect.any(String), extras: [] },
+    });
+  });
+
+  it("records a guest purchase under the buyer's email", async () => {
+    await buy(["Anna"], "guest");
+
+    expect((await auditEntries("ticket.purchase"))[0]).toMatchObject({
+      actorUid: null, actorEmail: "buyer@example.com", actorRole: "guest",
     });
   });
 

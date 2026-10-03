@@ -1,7 +1,7 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  apiFetch, createUser, resetEmulators, seedTicketType, soldCount, startApi, stopApi, type TestUser,
+  attendee, buyOnline, createUser, resetEmulators, seedTicketType, soldCount, startApi, stopApi, type TestUser,
 } from "./helpers";
 
 // How production runs while the deployed setup is tested with Stripe's test key
@@ -21,11 +21,7 @@ let user: TestUser;
 let staff: TestUser;
 let admin: TestUser;
 
-const buy = (token: string) =>
-  apiFetch("POST", "/tickets", {
-    token,
-    body: { items: [{ typeId: "general", holderName: "Holder", holderEmail: "h@example.com" }] },
-  });
+const buy = (token?: string) => buyOnline([attendee()], { token });
 
 beforeAll(startApi);
 afterAll(stopApi);
@@ -48,6 +44,11 @@ describe("online sales open to staff only", () => {
     expect(res.body).toBe("online sales are open to staff only for now");
     expect(await soldCount("general")).toBe(0);
     expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("refuses a guest too", async () => {
+    expect((await buy()).status).toBe(403);
+    expect(await soldCount("general")).toBe(0);
   });
 
   it("lets staff and admins buy", async () => {
