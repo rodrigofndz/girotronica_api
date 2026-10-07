@@ -22,7 +22,9 @@ import { adminTicketTypes, ticketTypes } from "./tickets/ticketTypes";
 import { tickets } from "./tickets/tickets";
 import { orders } from "./orders/routes";
 import { purchase } from "./orders/purchase";
+import { ticketAssignment } from "./users/assign";
 import { lanParty } from "./users/lanParty";
+import { userList } from "./users/list";
 import { me } from "./users/me";
 import { userLookup } from "./users/lookup";
 import { staff } from "./users/staff";
@@ -95,6 +97,8 @@ app.route("/users/lan-party", lanParty);
 app.route("/users/by-email", userLookup);
 app.route("/users", staff);
 app.route("/users", suspension);
+app.route("/users", userList);
+app.route("/users", ticketAssignment);
 app.route("/audit", auditLog);
 
 app.openapi(

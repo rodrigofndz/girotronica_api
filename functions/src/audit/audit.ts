@@ -106,6 +106,10 @@ export const AUDIT_ACTIONS = {
     description: "Partly refunded in Stripe; left active for an admin to decide",
     details: z.object({ ...stripeEvent, chargeId: z.string(), amount: z.int(), amountRefunded: z.int() }),
   },
+  "ticket.assign": {
+    description: "Given by an admin to a registered user, using a place but no payment",
+    details: z.object({ typeId: z.string(), uid: z.string(), email: z.string() }),
+  },
   "user.promote": {
     description: "Promoted to staff",
     details: z.object({}),

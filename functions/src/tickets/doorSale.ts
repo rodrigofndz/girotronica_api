@@ -13,7 +13,7 @@ import { packIds, reserveCapacity } from "./capacity";
 export const doorSale = new OpenAPIHono<Env>();
 
 const DoorSaleSchema = z.object({
-  paymentMethod: z.enum(PAYMENT_METHODS).exclude(["stripe"]),
+  paymentMethod: z.enum(PAYMENT_METHODS).exclude(["stripe", "assigned"]),
   items: z
     .array(
       z.object({

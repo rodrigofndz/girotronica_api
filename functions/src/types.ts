@@ -5,7 +5,8 @@ export type Role = (typeof ROLES)[number];
 export const TICKET_STATUSES = ["pending", "active", "cancelled"] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
 
-export const PAYMENT_METHODS = ["stripe", "cash", "card_terminal"] as const;
+// "assigned": given by an admin to a registered user, with no payment
+export const PAYMENT_METHODS = ["stripe", "cash", "card_terminal", "assigned"] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 /** How the web groups ticket types: single tickets, LAN/Fighting, and season passes. */
