@@ -83,38 +83,3 @@ staff.openapi(
   }),
   async (c) => c.json(await setStaffRole(c.get("user"), c.req.valid("param").uid, "user"), 200),
 );
-
-staff.openapi(
-  createRoute({
-    method: "get",
-    path: "/staff",
-    tags: ["Users"],
-    summary: "List staff and admins",
-    description: "Admin only. Admins first, then staff, each group sorted by email.",
-    security: bearerAuth,
-    middleware: [requireAdmin] as const,
-    responses: {
-      200: {
-        description: "Everyone with the staff or admin role",
-        content: { "application/json": { schema: z.array(UserProfileSchema) } },
-      },
-      403: { description: "Caller is not admin" },
-    },
-  }),
-  async (c) => {
-    const snap = await getFirestore()
-      .collection("users")
-      .where("role", "in", ["staff", "admin"] satisfies Role[])
-      .get();
-
-    const people = snap.docs.map((doc) => profileResponse(doc.id, doc.data() as UserProfile));
-
-    people.sort(
-      (a, b) =>
-        Number(b.role === "admin") - Number(a.role === "admin") ||
-        (a.email ?? "").localeCompare(b.email ?? ""),
-    );
-
-    return c.json(people, 200);
-  },
-);
