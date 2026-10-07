@@ -213,38 +213,19 @@ describe("user lookup", () => {
   });
 });
 
-describe("staff list", () => {
-  it("lists only staff and admins, admins first, then by email", async () => {
-    await createUser("zoe.staff@example.com", "staff");
-    await createUser("amy.staff@example.com", "staff");
-    await createUser("plain@example.com");
-    await createUser("second.admin@example.com", "admin");
-
-    const res = await apiFetch("GET", "/users/staff", { token: admin.token });
-
-    expect(res.status).toBe(200);
-    expect(res.body.map((p: { email: string; role: string }) => `${p.role}:${p.email}`)).toEqual([
-      "admin:admin@example.com",
-      "admin:second.admin@example.com",
-      "staff:amy.staff@example.com",
-      "staff:zoe.staff@example.com",
-    ]);
-  });
-
-  it("reflects a promotion straight away", async () => {
+describe("the team in the user list", () => {
+  it("shows a promotion straight away", async () => {
     const user = await createUser("rising@example.com");
     await apiFetch("POST", `/users/${user.uid}/staff`, { token: admin.token });
 
-    const res = await apiFetch("GET", "/users/staff", { token: admin.token });
+    const res = await apiFetch("GET", "/users?role=staff,admin", { token: admin.token });
 
-    expect(res.body.some((p: { uid: string }) => p.uid === user.uid)).toBe(true);
+    expect(res.body.users.some((p: { uid: string }) => p.uid === user.uid)).toBe(true);
   });
 
-  it("is closed to staff and plain users", async () => {
-    const staff = await createUser("staff@example.com", "staff");
-    const plain = await createUser("plain@example.com");
-
-    expect((await apiFetch("GET", "/users/staff", { token: staff.token })).status).toBe(403);
-    expect((await apiFetch("GET", "/users/staff", { token: plain.token })).status).toBe(403);
+  // Replaced by GET /users?role=staff,admin
+  it("no longer has a separate staff list", async () => {
+    expect((await apiFetch("GET", "/users/staff", { token: admin.token })).status).toBe(404);
   });
 });
+

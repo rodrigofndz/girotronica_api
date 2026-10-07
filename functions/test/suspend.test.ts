@@ -155,13 +155,13 @@ describe("who may suspend whom", () => {
 });
 
 describe("the suspended flag in responses", () => {
-  it("shows in the email lookup and the staff list", async () => {
+  it("shows in the email lookup and the user list", async () => {
     await suspend(staff.uid, admin);
 
     const lookup = await apiFetch("GET", "/users/by-email?email=user@example.com", { token: admin.token });
-    const list = await apiFetch("GET", "/users/staff", { token: admin.token });
+    const list = await apiFetch("GET", "/users?role=staff", { token: admin.token });
 
     expect(lookup.body.suspended).toBe(false);
-    expect(list.body.find((p: { uid: string }) => p.uid === staff.uid).suspended).toBe(true);
+    expect(list.body.users.find((p: { uid: string }) => p.uid === staff.uid).suspended).toBe(true);
   });
 });
