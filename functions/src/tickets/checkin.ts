@@ -4,11 +4,9 @@ import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { audit, auditedAs } from "../audit/audit";
 import { requireStaff, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
-import { TICKET_STATUSES, type Ticket, type UserProfile } from "../types";
+import { EVENT_TIMEZONE, TICKET_STATUSES, type Ticket, type UserProfile } from "../types";
 
 export const checkin = new OpenAPIHono<Env>();
-
-const EVENT_TIMEZONE = "Europe/Madrid";
 
 function today(): string {
   // en-CA formats as YYYY-MM-DD

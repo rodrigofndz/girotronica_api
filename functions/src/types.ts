@@ -58,6 +58,9 @@ export type UserProfile = {
   suspendedBy?: string | null;
 };
 
+/** Where the event happens; its days and dates without a time are read in this zone. */
+export const EVENT_TIMEZONE = "Europe/Madrid";
+
 export type TicketType = {
   id: string;
   name: string;
