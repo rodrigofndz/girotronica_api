@@ -6,7 +6,7 @@ import Stripe from "stripe";
 import { audit, auditedAs } from "../audit/audit";
 import { requireAdmin, type Env, type User } from "../auth";
 import { syncExtraProduct } from "../extras/sync";
-import { chargeablePrice, slugify } from "../stripeCatalogue";
+import { chargeablePrice, priceChanges, slugify } from "../stripeCatalogue";
 import { bearerAuth } from "../schemas";
 import { stripeSecretKey } from "../stripe";
 import { type TicketType, typeSettings } from "../types";
@@ -34,11 +34,12 @@ export type SyncResult = z.infer<typeof ResultSchema>;
 type Result = SyncResult;
 
 /**
- * Brings one Stripe product into its ticket type. Stripe owns the price; the name is
+ * Brings one Stripe product into its ticket type. Stripe owns the price, including later
+ * prices dated with metadata.from (`prices` are the product's own); the name is
  * only filled in when empty, so the web can word it its own way; everything else
  * (days, capacity, LAN, sale window) is the admin's and never touched.
  */
-async function syncProduct(actor: User, product: Stripe.Product): Promise<Result> {
+async function syncProduct(actor: User, product: Stripe.Product, prices: Stripe.Price[]): Promise<Result> {
   const base = {
     stripeProductId: product.id, name: product.name, kind: "ticketType" as const,
     typeId: null, extraId: null, changes: {}, reason: null,
@@ -48,6 +49,10 @@ async function syncProduct(actor: User, product: Stripe.Product): Promise<Result
   const price = chargeablePrice(product);
   if (typeof price === "string") return skip(price);
   const amount = price.unit_amount!;
+
+  const schedule = priceChanges(product, prices);
+  if (typeof schedule === "string") return skip(schedule);
+  const notes = [...schedule.notes];
 
   // People per unit sold, from the product's metadata like its price: "10" for a 10-person pack
   const rawPackSize = product.metadata.packSize?.trim();
@@ -85,6 +90,7 @@ async function syncProduct(actor: User, product: Stripe.Product): Promise<Result
         sold: 0,
         stripeProductId: product.id,
         stripePriceId: price.id,
+        priceChanges: schedule.changes,
         category: "general",
         packSize,
         entries: "once",
@@ -102,7 +108,7 @@ async function syncProduct(actor: User, product: Stripe.Product): Promise<Result
         target: { id, label: product.name },
         details: { stripeProductId: product.id, created: true, changes },
       });
-      return { ...base, result: "created", typeId: id, changes };
+      return { ...base, result: "created", typeId: id, changes, reason: notes.join("; ") || null };
     }
 
     const doc = linked.docs[0];
@@ -112,6 +118,9 @@ async function syncProduct(actor: User, product: Stripe.Product): Promise<Result
 
     if (current.price !== amount) changes.price = { from: current.price, to: amount };
     if (current.stripePriceId !== price.id) changes.stripePriceId = { from: current.stripePriceId ?? null, to: price.id };
+    if (JSON.stringify(current.priceChanges ?? []) !== JSON.stringify(schedule.changes)) {
+      changes.priceChanges = { from: current.priceChanges ?? [], to: schedule.changes };
+    }
     if (!current.name) changes.name = { from: current.name ?? null, to: product.name };
     if (!current.description && product.description) {
       changes.description = { from: current.description ?? null, to: product.description };
@@ -119,10 +128,9 @@ async function syncProduct(actor: User, product: Stripe.Product): Promise<Result
 
     // Stock is counted in units of packSize, so it can't change under existing sales
     const currentPackSize = typeSettings(current).packSize;
-    let note: string | null = null;
     if (currentPackSize !== packSize) {
       if (sold > 0) {
-        note = `metadata.packSize is ${packSize} but ${sold} units were sold as packs of ${currentPackSize}, so it stays ${currentPackSize}`;
+        notes.push(`metadata.packSize is ${packSize} but ${sold} units were sold as packs of ${currentPackSize}, so it stays ${currentPackSize}`);
       } else {
         changes.packSize = { from: currentPackSize, to: packSize };
       }
@@ -132,6 +140,7 @@ async function syncProduct(actor: User, product: Stripe.Product): Promise<Result
       changes.capacity = { from: current.capacity, to: sold };
     }
 
+    const note = notes.join("; ") || null;
     if (Object.keys(changes).length === 0) {
       return { ...base, result: "unchanged", typeId: doc.id, reason: note };
     }
@@ -159,7 +168,12 @@ ticketTypeSync.openapi(
       "New products arrive not for sale (no days, capacity 0) until an admin completes them. " +
       "Prices and pack sizes (metadata.packSize, default 1) always follow Stripe, except a pack " +
       "size once units are sold; a name and description are only filled in when empty. " +
-      "Products archived in Stripe stop selling. Safe to run as often as needed.",
+      "Products archived in Stripe stop selling. Safe to run as often as needed. " +
+"A ticket type's price can change on a date by itself: give the product's prices " +
+      "metadata.from, a date (2026-11-01, from midnight at the event) or a date-time with its " +
+      "offset. Once any price has one, the dated prices decide and the default price doesn't: " +
+      "the price is the one whose date passed last, or the earliest one before any has. " +
+      "Prices that can't be used are named in `reason`.",
     security: bearerAuth,
     ...auditedAs("ticketType.stripeSync", "extra.stripeSync"),
     middleware: [requireAdmin] as const,
@@ -174,10 +188,13 @@ ticketTypeSync.openapi(
   }),
   async (c) => {
     let products: Stripe.Product[];
+    let prices: Stripe.Price[];
     try {
-      products = await new Stripe(stripeSecretKey())
-        .products.list({ limit: 100, expand: ["data.default_price"] })
-        .autoPagingToArray({ limit: 10000 });
+      const stripe = new Stripe(stripeSecretKey());
+      [products, prices] = await Promise.all([
+        stripe.products.list({ limit: 100, expand: ["data.default_price"] }).autoPagingToArray({ limit: 10000 }),
+        stripe.prices.list({ limit: 100, active: true }).autoPagingToArray({ limit: 10000 }),
+      ]);
     } catch (err) {
       console.error("failed to list Stripe products", err);
       throw new HTTPException(502, { message: "could not read the Stripe catalogue" });
@@ -189,7 +206,7 @@ ticketTypeSync.openapi(
       results.push(
         product.metadata.kind === "extra"
           ? await syncExtraProduct(c.get("user"), product)
-          : await syncProduct(c.get("user"), product),
+          : await syncProduct(c.get("user"), product, prices.filter((p) => p.product === product.id)),
       );
     }
 

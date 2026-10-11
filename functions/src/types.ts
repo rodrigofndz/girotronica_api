@@ -75,6 +75,9 @@ export type TicketType = {
   // Set by the Stripe sync; the price is Stripe's and only changes there
   stripeProductId?: string | null;
   stripePriceId?: string | null;
+  // The Stripe prices with metadata.from, the default one included, oldest first. When there
+  // are any, they set the price instead of price/stripePriceId; read it through priceAt()
+  priceChanges?: PriceChange[];
   // Set by an admin; absent on types made before they existed, read through typeSettings()
   category?: TicketCategory;
   packSize?: number;       // one unit sold is this many tickets, one per person; capacity counts units
@@ -85,6 +88,35 @@ export type TicketType = {
   features?: string[];           // the "+ Més informació" bullet list
   disclaimer?: string | null;    // small print under the card
 };
+
+export type PriceChange = {
+  from: string;            // UTC ISO date-time
+  price: number;           // cents
+  stripePriceId: string;
+};
+
+/**
+ * The price a type sells at, at `now`, and the next change still to come. With dated prices,
+ * it's the one whose date passed last, or the earliest one before any date has passed; the
+ * plain price is only for a type without dated prices.
+ */
+export function priceAt(
+  type: Pick<TicketType, "price" | "stripePriceId" | "priceChanges">,
+  now = new Date(),
+): { price: number; stripePriceId: string | null; next: PriceChange | null } {
+  const changes = type.priceChanges ?? [];
+  if (changes.length === 0) {
+    return { price: type.price, stripePriceId: type.stripePriceId ?? null, next: null };
+  }
+  // Oldest first, so the started ones lead; none started yet means the earliest applies
+  const started = changes.filter((change) => Date.parse(change.from) <= now.getTime()).length;
+  const current = changes[Math.max(started - 1, 0)];
+  return {
+    price: current.price,
+    stripePriceId: current.stripePriceId,
+    next: changes[Math.max(started, 1)] ?? null,
+  };
+}
 
 /** A type's admin settings with the defaults for types stored before the fields existed. */
 export function typeSettings(type: Pick<TicketType, "category" | "packSize" | "entries" | "extrasFrom">) {

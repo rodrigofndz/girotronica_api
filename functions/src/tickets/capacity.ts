@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
-import { type Ticket, type TicketType, typeSettings } from "../types";
+import { priceAt, type Ticket, type TicketType, typeSettings } from "../types";
 
 /**
  * Whether a type can be sold at `now`: it grants at least one day (a type just synced from
@@ -24,7 +24,8 @@ export function isOnSale(
  * Loads the requested ticket types, refuses the sale if any of them is outside its sale
  * window or would go over capacity, and reserves the slots by bumping their `sold` counters.
  * Items are tickets, one per person; a pack type is reserved in whole units of `packSize`
- * tickets, and that's what its capacity and `sold` count. Must run inside a transaction so
+ * tickets, and that's what its capacity and `sold` count. The types come back at their current
+ * price (see priceAt). Must run inside a transaction so
  * two buyers can't take the same last slot.
  */
 export async function reserveCapacity(
@@ -46,7 +47,10 @@ export async function reserveCapacity(
     if (!doc.exists) {
       throw new HTTPException(400, { message: `unknown ticket type: ${doc.id}` });
     }
-    types.set(doc.id, { id: doc.id, ...(doc.data() as Omit<TicketType, "id">) });
+    const type = doc.data() as Omit<TicketType, "id">;
+    // Priced as of now, so callers charge and record the price that has started
+    const { price, stripePriceId } = priceAt(type);
+    types.set(doc.id, { id: doc.id, ...type, price, stripePriceId });
   }
 
   for (const type of types.values()) {

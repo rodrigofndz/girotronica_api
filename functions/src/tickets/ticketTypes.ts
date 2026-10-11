@@ -7,7 +7,7 @@ import { audit, auditedAs } from "../audit/audit";
 import { requireAdmin, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
 import { stripeSecretKey } from "../stripe";
-import { ENTRY_RULES, EXTRA_GROUPS, TICKET_CATEGORIES, type TicketType, typeSettings } from "../types";
+import { ENTRY_RULES, EXTRA_GROUPS, priceAt, TICKET_CATEGORIES, type TicketType, typeSettings } from "../types";
 import { isOnSale } from "./capacity";
 
 export const ticketTypes = new OpenAPIHono<Env>();
@@ -25,7 +25,13 @@ const saleBound = z.iso
 const TicketTypeSchema = z.object({
   id: z.string(),
   name: z.string(),
-  price: z.int().nonnegative().openapi({ description: "Cents; comes from Stripe and only changes there" }),
+  price: z.int().nonnegative().openapi({
+    description: "Cents, at the moment of asking; comes from Stripe and only changes there",
+  }),
+  nextPrice: z.object({
+    price: z.int().nonnegative(),
+    from: z.string().openapi({ format: "date-time" }),
+  }).nullable().openapi({ description: "The next price change set in Stripe, if one is still to come" }),
   capacity: z.int().nonnegative().nullable(), // 0 means not for sale, null unlimited
   isLanParty: z.boolean(),
   days: z.array(isoDate).openapi({ description: "Empty on a type just synced from Stripe, until an admin sets it" }),
@@ -83,10 +89,12 @@ const params = z.object({
 
 function present(id: string, type: Omit<TicketType, "id">) {
   const sold = type.sold ?? 0;
+  const { price, next } = priceAt(type);
   return {
     id,
     name: type.name,
-    price: type.price,
+    price,
+    nextPrice: next && { price: next.price, from: next.from },
     capacity: type.capacity,
     isLanParty: type.isLanParty,
     days: type.days,

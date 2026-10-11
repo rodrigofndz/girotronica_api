@@ -3,13 +3,15 @@ import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from "vites
 
 import { apiFetch, auditEntries, createUser, resetEmulators, startApi, stopApi, type TestUser } from "./helpers";
 
-// Only the product listing is faked; everything else about the Stripe class stays real
+// Only the catalogue listing is faked; everything else about the Stripe class stays real
 const listProducts = vi.hoisted(() => vi.fn());
+const noPrices = { list: () => ({ autoPagingToArray: async () => [] }) };
 
 vi.mock("stripe", async (importOriginal) => {
   const Real = ((await importOriginal()) as { default: new (key: string) => object }).default;
   class FakeCatalogueStripe extends Real {
     products = { list: listProducts };
+    prices = noPrices;
   }
   return { default: FakeCatalogueStripe };
 });

@@ -8,11 +8,13 @@ import {
 // Only the product listing is faked; everything else about the Stripe class stays real
 const listProducts = vi.hoisted(() => vi.fn());
 const retrieveProduct = vi.hoisted(() => vi.fn());
+const listPrices = vi.hoisted(() => vi.fn());
 
 vi.mock("stripe", async (importOriginal) => {
   const Real = ((await importOriginal()) as { default: new (key: string) => object }).default;
   class FakeCatalogueStripe extends Real {
     products = { list: listProducts, retrieve: retrieveProduct };
+    prices = { list: listPrices };
   }
   return { default: FakeCatalogueStripe };
 });
@@ -35,6 +37,12 @@ const catalogue = (products: FakeProduct[]) =>
       products.map((p) => ({ active: true, metadata: {}, default_price: null, ...p })),
   });
 
+/** Sets the active prices Stripe lists, besides each product's default one. */
+const prices = (list: Record<string, unknown>[]) =>
+  listPrices.mockReturnValue({
+    autoPagingToArray: async () => list.map((p) => ({ active: true, metadata: {}, ...p })),
+  });
+
 let admin: TestUser;
 let staff: TestUser;
 
@@ -49,6 +57,8 @@ beforeEach(async () => {
   await resetEmulators();
   listProducts.mockReset();
   retrieveProduct.mockReset();
+  listPrices.mockReset();
+  prices([]);
   admin = await createUser("admin@example.com", "admin");
   staff = await createUser("staff@example.com", "staff");
 });
@@ -62,7 +72,7 @@ describe("a new Stripe product", () => {
     expect(res.body.results).toEqual([expect.objectContaining({ result: "created", typeId: "pack-de-tres-dies" })]);
     expect(await stored("pack-de-tres-dies")).toEqual({
       name: "Pack de tres dies", price: 1300, capacity: 0, isLanParty: false, days: [], sold: 0,
-      stripeProductId: "prod_pack", stripePriceId: "price_pack",
+      stripeProductId: "prod_pack", stripePriceId: "price_pack", priceChanges: [],
       category: "general", packSize: 1, entries: "once", extrasFrom: "general",
       description: null, features: [], disclaimer: null,
     });
