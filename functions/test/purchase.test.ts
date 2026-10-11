@@ -134,6 +134,21 @@ describe("what gets charged", () => {
     expect(lastSession().line_items).toEqual([{ price: "price_pack10", quantity: 1 }]);
   });
 
+  it("charges the Stripe price that has started, not the first one", async () => {
+    await seedTicketType("lan-late", {
+      price: 2500, stripePriceId: "price_early",
+      priceChanges: [
+        { from: "2020-01-01T00:00:00.000Z", price: 3000, stripePriceId: "price_regular" },
+        { from: "2099-01-01T00:00:00.000Z", price: 3500, stripePriceId: "price_late" },
+      ],
+    });
+
+    const res = await buyOnline([attendee({ typeId: "lan-late" })]);
+
+    expect(lastSession().line_items).toEqual([{ price: "price_regular", quantity: 1 }]);
+    expect((await orderDoc(res.body.orderId))!.total).toBe(3000);
+  });
+
   it("uses an inline price for a type not synced from Stripe", async () => {
     await seedTicketType("manual", { price: 400 });
 

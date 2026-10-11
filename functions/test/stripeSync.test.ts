@@ -233,6 +233,157 @@ describe("pack sizes from Stripe", () => {
   });
 });
 
+describe("prices that change on a date", () => {
+  const DAY = 24 * 3600_000;
+  const product = { id: "prod_lan", name: "Entrada LAN", default_price: eur("price_early", 2500) };
+  const later = (id: string, amount: number, from: string, extra: Record<string, unknown> = {}) =>
+    ({ ...eur(id, amount), product: "prod_lan", metadata: { from }, ...extra });
+  const listedType = async () => (await apiFetch("GET", "/ticket-types")).body[0];
+
+  beforeEach(() => catalogue([product]));
+
+  it("uses the default price while no price has a date", async () => {
+    prices([{ ...eur("price_plain", 100), product: "prod_lan" }]);
+
+    await sync();
+
+    expect(await listedType()).toMatchObject({ price: 2500, nextPrice: null });
+  });
+
+  it("before any date passes, uses the earliest dated price, not the default, and says what's next", async () => {
+    const soon = new Date(Date.now() + DAY).toISOString();
+    prices([later("price_late", 3500, "2099-01-15"), later("price_regular", 3000, soon)]);
+
+    await sync();
+
+    expect(await stored("entrada-lan")).toMatchObject({
+      price: 2500, stripePriceId: "price_early",
+      priceChanges: [
+        { from: soon, price: 3000, stripePriceId: "price_regular" },
+        { from: "2099-01-14T23:00:00.000Z", price: 3500, stripePriceId: "price_late" },
+      ],
+    });
+    expect(await listedType()).toMatchObject({
+      price: 3000, nextPrice: { price: 3500, from: "2099-01-14T23:00:00.000Z" },
+    });
+  });
+
+  it("counts a date on the default price like any other", async () => {
+    const at = (hours: number) => new Date(Date.now() + hours * 3600_000).toISOString();
+    // A 7 € first phase and the default 9 € from an hour later; Stripe lists the default too
+    const setUp = (first: string, second: string) => {
+      const regular = { ...eur("price_9", 900), active: true, product: "prod_lan", metadata: { from: second } };
+      catalogue([{ ...product, default_price: regular }]);
+      prices([later("price_7", 700, first), regular]);
+    };
+
+    setUp(at(1), at(2));
+    await sync();
+    expect(await listedType()).toMatchObject({ price: 700, nextPrice: { price: 900 } });
+
+    setUp(at(-2), at(-1));
+    await sync();
+    expect(await listedType()).toMatchObject({ price: 900, nextPrice: null });
+    expect((await stored("entrada-lan"))!.priceChanges.map((c: { price: number }) => c.price)).toEqual([700, 900]);
+  });
+
+  it("switches by itself once the date passes, with no sync needed", async () => {
+    prices([
+      later("price_regular", 3000, new Date(Date.now() - DAY).toISOString()),
+      later("price_late", 3500, "2099-07-01"),
+    ]);
+    await sync();
+
+    expect(await listedType()).toMatchObject({
+      price: 3000, nextPrice: { price: 3500, from: "2099-06-30T22:00:00.000Z" },
+    });
+  });
+
+  it("charges the started price at the door and online", async () => {
+    prices([later("price_regular", 3000, "2020-01-01")]);
+    await sync();
+    await apiFetch("PATCH", "/ticket-types/entrada-lan", {
+      token: admin.token, body: { days: ["2026-11-20"], capacity: 10 },
+    });
+
+    await apiFetch("POST", "/tickets/door", {
+      token: staff.token,
+      body: { paymentMethod: "cash", items: [{ typeId: "entrada-lan", holderName: "A", holderEmail: "a@example.com" }] },
+    });
+
+    expect((await auditEntries("ticket.doorSale"))[0].details.price).toBe(3000);
+    expect(await listedType()).toMatchObject({ price: 3000, nextPrice: null });
+  });
+
+  it("reads a date as midnight at the event, in winter and in summer time", async () => {
+    prices([later("price_winter", 3000, "2099-11-01"), later("price_summer", 3500, "2099-07-01T12:00:00+02:00")]);
+
+    await sync();
+
+    expect((await stored("entrada-lan"))!.priceChanges.map((c: { from: string }) => c.from)).toEqual([
+      "2099-07-01T10:00:00.000Z", "2099-10-31T23:00:00.000Z",
+    ]);
+  });
+
+  it("ignores other products' prices, inactive prices, and prices without a date", async () => {
+    prices([
+      later("price_other", 100, "2099-01-01", { product: "prod_other" }),
+      later("price_off", 100, "2099-01-01", { active: false }),
+      { ...eur("price_plain", 100), product: "prod_lan" },
+    ]);
+
+    const res = await sync();
+
+    expect(res.body.results[0]).toMatchObject({ result: "created", reason: null });
+    expect((await stored("entrada-lan"))!.priceChanges).toEqual([]);
+  });
+
+  it.each([
+    ["a date it can't read", later("price_bad", 3000, "1 de novembre"),
+      'price price_bad is left out: metadata.from must be a date like 2026-11-01, got "1 de novembre"'],
+    ["a date that doesn't exist", later("price_bad", 3000, "2099-02-30"),
+      'price price_bad is left out: metadata.from must be a date like 2026-11-01, got "2099-02-30"'],
+    ["a price in dollars", later("price_bad", 3000, "2099-11-01", { currency: "usd" }),
+      "price price_bad is left out: it must be a one-time price in EUR"],
+  ])("leaves out %s and says so", async (_label, price, reason) => {
+    prices([price]);
+
+    const res = await sync();
+
+    expect(res.body.results[0]).toMatchObject({ result: "created", reason });
+    expect((await stored("entrada-lan"))!.priceChanges).toEqual([]);
+  });
+
+  it("skips the product when two prices start at the same moment", async () => {
+    prices([later("price_a", 3000, "2099-11-01"), later("price_b", 3100, "2099-10-31T23:00:00Z")]);
+
+    const res = await sync();
+
+    expect(res.body.results[0]).toMatchObject({
+      result: "skipped",
+      reason: "two prices start at 2099-10-31T23:00:00.000Z; give them different metadata.from dates",
+    });
+  });
+
+  it("records a change to the dates in the log, and nothing when they're the same", async () => {
+    await sync();
+    prices([later("price_regular", 3000, "2099-11-01")]);
+
+    const res = await sync();
+    await sync();
+
+    expect(res.body.results[0]).toMatchObject({
+      result: "updated",
+      changes: {
+        priceChanges: {
+          from: [], to: [{ from: "2099-10-31T23:00:00.000Z", price: 3000, stripePriceId: "price_regular" }],
+        },
+      },
+    });
+    expect(await auditEntries("ticketType.stripeSync")).toHaveLength(2);
+  });
+});
+
 describe("products it can't use", () => {
   it("skips them with the reason, and changes nothing for them", async () => {
     await seedTicketType("taken");
