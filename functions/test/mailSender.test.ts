@@ -20,7 +20,7 @@ const fakeTransport = (fail?: string): Transport & { sent: Record<string, unknow
 
 const queued = async () => {
   await queueTicketEmails([
-    { code: "code-1", holderName: "Anna Puig", holderEmail: "anna@example.com", days: ["2026-11-20"] },
+    { code: "code-1", typeId: "general", holderName: "Anna Puig", holderEmail: "anna@example.com", days: ["2026-11-20"] },
   ]);
   return (await getFirestore().collection("mail").get()).docs[0].ref;
 };

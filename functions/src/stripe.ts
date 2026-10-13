@@ -123,6 +123,7 @@ stripeWebhook.post("/", async (c) => {
           await queueTicketEmails(
             activated.map((t) => ({
               code: t.code,
+              typeId: t.typeId,
               holderName: t.holderName,
               holderEmail: t.holderEmail,
               days: t.days,

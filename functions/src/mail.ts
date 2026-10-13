@@ -18,6 +18,7 @@ export type MailDoc = {
 
 export type TicketEmail = {
   code: string;
+  typeId: string;
   holderName: string;
   holderEmail: string;
   days: string[];
@@ -28,17 +29,21 @@ export type TicketEmail = {
 const escapeHtml = (text: string) =>
   text.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 
+/** "2026-11-20" → "20/11/2026", the way dates are written here. */
+const dayMonthYear = (isoDate: string) => isoDate.split("-").reverse().join("/");
+
 /** "Samarreta (M), Gymsack": what was bought with the ticket, to collect at the event. */
 const extrasLine = (t: TicketEmail) =>
   (t.extras ?? []).length === 0
     ? ""
     : "<br>Extres: " + t.extras!.map((e) => escapeHtml(e.option ? `${e.name} (${e.option})` : e.name)).join(", ");
 
-function html(tickets: TicketEmail[]): string {
+function html(tickets: TicketEmail[], typeNames: Map<string, string>): string {
   const items = tickets
     .map(
       (t) =>
-        `<li><strong>${escapeHtml(t.holderName)}</strong> — ${t.days.join(", ")}${extrasLine(t)}<br>` +
+        `<li><strong>${escapeHtml(typeNames.get(t.typeId) ?? t.typeId)}</strong><br>` +
+        `${escapeHtml(t.holderName)} — ${t.days.map(dayMonthYear).join(", ")}${extrasLine(t)}<br>` +
         `<img src="cid:qr-${t.code}" alt="Codi QR" width="200"></li>`,
     )
     .join("");
@@ -66,6 +71,13 @@ export async function queueTicketEmails(tickets: TicketEmail[]): Promise<void> {
   const db = getFirestore();
   const batch = db.batch();
 
+  // Each ticket says which kind it is, by the type's name as it is now (the id if it's gone)
+  const typeIds = [...new Set(tickets.map((t) => t.typeId))];
+  const typeDocs = typeIds.length > 0 ? await db.getAll(...typeIds.map((id) => db.doc(`ticketTypes/${id}`))) : [];
+  const typeNames = new Map(
+    typeDocs.filter((doc) => doc.get("name")).map((doc) => [doc.id, doc.get("name") as string]),
+  );
+
   for (const [holderEmail, group] of byHolder) {
     const attachments = await Promise.all(
       group.map(async (t) => ({
@@ -88,7 +100,7 @@ export async function queueTicketEmails(tickets: TicketEmail[]): Promise<void> {
           group.length === 1
             ? "Mostra el codi QR adjunt a l'entrada del recinte."
             : "Mostra els codis QR adjunts a l'entrada del recinte.",
-        html: html(group),
+        html: html(group, typeNames),
         attachments,
       },
     } satisfies MailDoc);

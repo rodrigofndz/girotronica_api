@@ -107,6 +107,7 @@ doorSale.openapi(doorSaleRoute, async (c) => {
     await queueTicketEmails(
       items.map((item, i) => ({
         code: codes[i],
+        typeId: item.typeId,
         holderName: item.holderName,
         holderEmail: item.holderEmail,
         days: types.get(item.typeId)!.days,

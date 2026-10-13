@@ -114,7 +114,7 @@ ticketAssignment.openapi(
     // The ticket is the source of truth; a failed email shouldn't fail the assignment
     try {
       await queueTicketEmails([
-        { code, holderName: ticket.holderName, holderEmail: ticket.holderEmail, days: ticket.days },
+        { code, typeId, holderName: ticket.holderName, holderEmail: ticket.holderEmail, days: ticket.days },
       ]);
     } catch (err) {
       console.error("failed to queue assigned ticket email", err);
