@@ -86,6 +86,16 @@ describe("ticket emails", () => {
     expect(shared.message.attachments[0]).toMatchObject({ contentType: "image/png", encoding: "base64" });
   });
 
+  it("names the kind of ticket, as the type is called now", async () => {
+    await getFirestore().doc("ticketTypes/general").update({ name: "Entrada general <3 dies>" });
+
+    await doorSale([oneItem()]);
+
+    const [mail] = await mailDocs();
+    expect(mail.message.html).toContain("<strong>Entrada general &#60;3 dies&#62;</strong>");
+    expect(mail.message.html).toContain("— 20/11/2026, 21/11/2026");
+  });
+
   it("shows the holder's name as text, never as markup", async () => {
     await doorSale([oneItem({ holderName: `<a href="https://evil.example">Claim refund</a>` })]);
 
