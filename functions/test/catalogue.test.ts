@@ -66,6 +66,24 @@ describe("the catalogue fields", () => {
     expect((await auditEntries("ticketType.update"))[0].details.changes).toEqual({ packSize: { from: 1, to: 10 } });
   });
 
+  it("refuses changing the pack size once packs are sold, but allows sending the same one", async () => {
+    await seedTicketType("pack", { packSize: 3, sold: 1 });
+    const setSize = (packSize: number) =>
+      apiFetch("PATCH", "/ticket-types/pack", { token: admin.token, body: { packSize } });
+
+    const changed = await setSize(4);
+
+    expect(changed.status).toBe(409);
+    expect(changed.body).toBe("1 units were sold as packs of 3, so the pack size can't change");
+    expect((await setSize(3)).status).toBe(200);
+  });
+
+  it.each([0, 21, 2.5])("refuses a pack size of %s", async (packSize) => {
+    await seedTicketType("pack");
+
+    expect((await apiFetch("PATCH", "/ticket-types/pack", { token: admin.token, body: { packSize } })).status).toBe(400);
+  });
+
   it.each([
     ["an unknown category", { category: "vip" }],
     ["an unknown extras group", { extrasFrom: "pack" }],

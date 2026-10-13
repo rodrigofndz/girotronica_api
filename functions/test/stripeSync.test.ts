@@ -189,6 +189,17 @@ describe("pack sizes", () => {
     expect((await stored("pack"))!.packSize).toBe(1);
   });
 
+  it("are kept on a sync", async () => {
+    catalogue([{ id: "prod_pack", name: "Pack", default_price: eur("price_pack", 3000) }]);
+    await sync();
+    await apiFetch("PATCH", "/ticket-types/pack", { token: admin.token, body: { packSize: 10 } });
+    catalogue([{ id: "prod_pack", name: "Pack", metadata: { packSize: "8" }, default_price: eur("price_pack", 2800) }]);
+
+    const res = await sync();
+
+    expect(res.body.results[0].changes).not.toHaveProperty("packSize");
+    expect(await stored("pack")).toMatchObject({ packSize: 10, price: 2800 });
+  });
 });
 
 describe("prices that change on a date", () => {
