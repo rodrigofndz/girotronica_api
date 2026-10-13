@@ -126,12 +126,14 @@ describe("what gets charged", () => {
     expect((await orderDoc(res.body.orderId))!.total).toBe(900 * 2 + 1500 * 2 + 800);
   });
 
-  it("charges a pack once per unit, not once per person", async () => {
-    await seedTicketType("pack-10", { capacity: 5, price: 35000, packSize: 2, stripePriceId: "price_pack10" });
+  it("charges a pack's per-person price for each of its people", async () => {
+    await seedTicketType("pack-10", { capacity: 5, price: 3000, packSize: 2, stripePriceId: "price_pack10" });
 
-    await buyOnline([attendee({ typeId: "pack-10" }), attendee({ typeId: "pack-10" })]);
+    const res = await buyOnline([attendee({ typeId: "pack-10" }), attendee({ typeId: "pack-10" })]);
 
-    expect(lastSession().line_items).toEqual([{ price: "price_pack10", quantity: 1 }]);
+    expect(lastSession().line_items).toEqual([{ price: "price_pack10", quantity: 2 }]);
+    expect((await orderDoc(res.body.orderId))!.total).toBe(6000);
+    expect(await soldCount("pack-10")).toBe(1);
   });
 
   it("charges the Stripe price that has started, not the first one", async () => {

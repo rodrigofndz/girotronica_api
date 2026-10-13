@@ -9,7 +9,7 @@ import { syncExtraProduct } from "../extras/sync";
 import { chargeablePrice, priceChanges, slugify } from "../stripeCatalogue";
 import { bearerAuth } from "../schemas";
 import { stripeSecretKey } from "../stripe";
-import { type TicketType, typeSettings } from "../types";
+import { type TicketType } from "../types";
 
 export const ticketTypeSync = new OpenAPIHono<Env>();
 
@@ -54,13 +54,6 @@ async function syncProduct(actor: User, product: Stripe.Product, prices: Stripe.
   if (typeof schedule === "string") return skip(schedule);
   const notes = [...schedule.notes];
 
-  // People per unit sold, from the product's metadata like its price: "10" for a 10-person pack
-  const rawPackSize = product.metadata.packSize?.trim();
-  const packSize = rawPackSize ? Number(rawPackSize) : 1;
-  if (!Number.isInteger(packSize) || packSize < 1) {
-    return skip(`metadata.packSize must be a whole number of 1 or more, got "${rawPackSize}"`);
-  }
-
   const db = getFirestore();
 
   return db.runTransaction(async (tx): Promise<Result> => {
@@ -92,7 +85,7 @@ async function syncProduct(actor: User, product: Stripe.Product, prices: Stripe.
         stripePriceId: price.id,
         priceChanges: schedule.changes,
         category: "general",
-        packSize,
+        packSize: 1,
         entries: "once",
         extrasFrom: "general",
         description: product.description ?? null,
@@ -126,15 +119,6 @@ async function syncProduct(actor: User, product: Stripe.Product, prices: Stripe.
       changes.description = { from: current.description ?? null, to: product.description };
     }
 
-    // Stock is counted in units of packSize, so it can't change under existing sales
-    const currentPackSize = typeSettings(current).packSize;
-    if (currentPackSize !== packSize) {
-      if (sold > 0) {
-        notes.push(`metadata.packSize is ${packSize} but ${sold} units were sold as packs of ${currentPackSize}, so it stays ${currentPackSize}`);
-      } else {
-        changes.packSize = { from: currentPackSize, to: packSize };
-      }
-    }
     // Archived in Stripe: stop sales the documented way, without losing what was sold
     if (!product.active && (current.capacity === null || current.capacity > sold)) {
       changes.capacity = { from: current.capacity, to: sold };
@@ -166,8 +150,8 @@ ticketTypeSync.openapi(
       "Admin only. Each Stripe product is one ticket type, priced by its default price, or an " +
       "extra if its metadata has kind = extra. " +
       "New products arrive not for sale (no days, capacity 0) until an admin completes them. " +
-      "Prices and pack sizes (metadata.packSize, default 1) always follow Stripe, except a pack " +
-      "size once units are sold; a name and description are only filled in when empty. " +
+      "Prices always follow Stripe, per person (a pack's price is per person too; the pack size " +
+      "is the admin's); a name and description are only filled in when empty. " +
       "Products archived in Stripe stop selling. Safe to run as often as needed. " +
 "A ticket type's price can change on a date by itself: give the product's prices " +
       "metadata.from, a date (2026-11-01, from midnight at the event) or a date-time with its " +

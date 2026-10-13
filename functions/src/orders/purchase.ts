@@ -140,7 +140,8 @@ purchase.openapi(
       }
       reserveExtras(tx, extras, attendees.map((a) => ({ type: types.get(a.typeId)!, picks: a.extras })));
 
-      const total = unitsByType(attendees, types).reduce((sum, id) => sum + types.get(id)!.price, 0)
+      // Prices are per person, packs included
+      const total = attendees.reduce((sum, a) => sum + types.get(a.typeId)!.price, 0)
         + attendees.reduce((sum, a) => sum + a.extras.reduce((s, e) => s + extras.get(e.extraId)!.price, 0), 0);
 
       const tickets = attendees.map((a, i): TicketWrite => {
@@ -244,8 +245,8 @@ purchase.openapi(
 );
 
 /**
- * What Stripe charges: one line per ticket type, counted in units (a pack's price covers all
- * its people), and one per extra. Free lines are left out; the order keeps them.
+ * What Stripe charges: one line per ticket type, one per person since prices are per person
+ * (packs included), and one per extra. Free lines are left out; the order keeps them.
  */
 function lineItems(
   attendees: Attendee[],
@@ -256,7 +257,7 @@ function lineItems(
 
   for (const type of types.values()) {
     if (type.price === 0) continue;
-    const quantity = attendees.filter((a) => a.typeId === type.id).length / typeSettings(type).packSize;
+    const quantity = attendees.filter((a) => a.typeId === type.id).length;
     // A type synced from Stripe is charged at Stripe's own price, so its catalogue,
     // reports and receipts show the real product
     items.push(type.stripePriceId

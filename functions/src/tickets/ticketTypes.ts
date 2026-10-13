@@ -13,6 +13,9 @@ import { isOnSale } from "./capacity";
 export const ticketTypes = new OpenAPIHono<Env>();
 export const adminTicketTypes = new OpenAPIHono<Env>();
 
+// One online order holds at most 20 people, so a bigger pack couldn't be bought
+const MAX_PACK_SIZE = 20;
+
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be an ISO date (YYYY-MM-DD)");
 
 // Accepts any offset and stores UTC, so comparisons never depend on how it was written
@@ -26,10 +29,12 @@ const TicketTypeSchema = z.object({
   id: z.string(),
   name: z.string(),
   price: z.int().nonnegative().openapi({
-    description: "Cents, at the moment of asking; comes from Stripe and only changes there",
+    description:
+      "Cents per person, at the moment of asking; comes from Stripe and only changes there. " +
+      "A pack costs price × packSize",
   }),
   nextPrice: z.object({
-    price: z.int().nonnegative(),
+    price: z.int().nonnegative().openapi({ description: "Cents per person, like `price`" }),
     from: z.string().openapi({ format: "date-time" }),
   }).nullable().openapi({ description: "The next price change set in Stripe, if one is still to come" }),
   capacity: z.int().nonnegative().nullable(), // 0 means not for sale, null unlimited
@@ -44,10 +49,10 @@ const TicketTypeSchema = z.object({
   }),
   stripeProductId: z.string().nullable().openapi({ description: "The Stripe product it was synced from" }),
   category: z.enum(TICKET_CATEGORIES).openapi({ description: "How the web groups it" }),
-  packSize: z.int().min(1).openapi({
+  packSize: z.int().min(1).max(MAX_PACK_SIZE).openapi({
     description:
-      "Tickets per unit sold, one per person; capacity, sold and remaining count units. " +
-      "From the Stripe product's metadata.packSize (default 1)",
+      "People per unit sold, one ticket each; capacity, sold and remaining count units. " +
+      `Set by an admin (default 1, at most ${MAX_PACK_SIZE}, the most one online order can hold)`,
   }),
   entries: z.enum(ENTRY_RULES).openapi({
     description: "once: one check-in in total, on any of its days (default). daily: one per day it covers",
@@ -72,7 +77,7 @@ const WINDOW_ORDER_MESSAGE = "salesStart must be before salesEnd";
 // Only checks the window when both ends are in the patch; the handler checks it against the stored type
 const UpdateSchema = TicketTypeSchema.pick({
   name: true, capacity: true, isLanParty: true, salesStart: true, salesEnd: true,
-  category: true, entries: true, extrasFrom: true,
+  category: true, entries: true, extrasFrom: true, packSize: true,
 })
   .extend({
     days: z.array(isoDate).min(1),
@@ -146,7 +151,7 @@ adminTicketTypes.openapi(
       "Admin only. The price can't be changed here: change it in Stripe and sync. " +
       "Capacity cannot go below what is already sold; set it equal to `sold` to stop sales. " +
       "Changing `days`, `isLanParty` or `entries` does not affect tickets already issued; " +
-      "Like the price, `packSize` comes from Stripe (metadata.packSize) and can't be set here. " +
+"`packSize` can't change once units are sold, since they were sold as packs of the old size. " +
       "Send null for `salesStart` or `salesEnd` to remove that bound.",
     security: bearerAuth,
     ...auditedAs("ticketType.update"),
@@ -163,7 +168,7 @@ adminTicketTypes.openapi(
       400: { description: "Invalid body, or the sale window would end before it starts" },
       403: { description: "Caller is not admin" },
       404: { description: "No such ticket type" },
-      409: { description: "Capacity is below the number already sold" },
+      409: { description: "Capacity is below the number already sold, or a pack size change after sales" },
     },
   }),
   async (c) => {
@@ -183,6 +188,13 @@ adminTicketTypes.openapi(
       if (patch.capacity !== undefined && patch.capacity !== null && patch.capacity < sold) {
         throw new HTTPException(409, {
           message: `capacity ${patch.capacity} is below the ${sold} already sold`,
+        });
+      }
+
+      const packSize = typeSettings(current).packSize;
+      if (patch.packSize !== undefined && patch.packSize !== packSize && sold > 0) {
+        throw new HTTPException(409, {
+          message: `${sold} units were sold as packs of ${packSize}, so the pack size can't change`,
         });
       }
 

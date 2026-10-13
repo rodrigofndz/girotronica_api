@@ -56,13 +56,14 @@ describe("the catalogue fields", () => {
     expect(res.body).toMatchObject({ category: "pack", packSize: 1, entries: "daily", extrasFrom: "lan" });
   });
 
-  // It comes from the Stripe product's metadata, like the price
-  it("refuses setting the pack size by hand", async () => {
-    await seedTicketType("pack");
+  it("lets an admin set the pack size, and logs it", async () => {
+    await seedTicketType("pack", { packSize: 1 });
 
     const res = await apiFetch("PATCH", "/ticket-types/pack", { token: admin.token, body: { packSize: 10 } });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    expect(res.body.packSize).toBe(10);
+    expect((await auditEntries("ticketType.update"))[0].details.changes).toEqual({ packSize: { from: 1, to: 10 } });
   });
 
   it.each([
