@@ -3,7 +3,7 @@ import { getFirestore } from "firebase-admin/firestore";
 
 import { requireStaff, type Env } from "../auth";
 import { bearerAuth, CheckinsSchema, checkinTimes, EmailSchema } from "../schemas";
-import { TICKET_STATUSES, type Ticket } from "../types";
+import { PAYMENT_METHODS, TICKET_STATUSES, type Ticket } from "../types";
 
 export const ticketLookup = new OpenAPIHono<Env>();
 
@@ -14,6 +14,9 @@ const FoundTicketSchema = z.object({
   status: z.enum(TICKET_STATUSES),
   holderName: z.string(),
   holderEmail: z.string(),
+  paymentMethod: z.enum(PAYMENT_METHODS).openapi({
+    description: "stripe: bought online; cash or card_terminal: sold at the door; assigned: given by an admin",
+  }),
   days: z.array(z.string()),
   checkins: CheckinsSchema,
 });
@@ -58,6 +61,7 @@ ticketLookup.openapi(
         status: t.status,
         holderName: t.holderName,
         holderEmail: t.holderEmail,
+        paymentMethod: t.paymentMethod,
         days: t.days,
         checkins: checkinTimes(t.checkins),
       };
