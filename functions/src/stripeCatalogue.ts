@@ -14,6 +14,16 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/**
+ * Why an id can't be used: the one set in metadata (`field`) when there is one, since that's
+ * what to fix, or else the product's name it was made from.
+ */
+export function badIdReason(kind: string, field: string, given: string | undefined, name: string): string {
+  return given
+    ? `metadata.${field} "${given}" can only use lowercase letters, numbers and hyphens, e.g. "${slugify(given) || "my-id"}"`
+    : `can't make ${kind} id from "${name}"; set metadata.${field} in Stripe`;
+}
+
 /** The product's default price when it's one this API can charge: one-time, in euros. */
 export function chargeablePrice(product: Stripe.Product): Stripe.Price | string {
   const price = product.default_price;

@@ -6,7 +6,7 @@ import Stripe from "stripe";
 import { audit, auditedAs } from "../audit/audit";
 import { requireAdmin, type Env, type User } from "../auth";
 import { syncExtraProduct } from "../extras/sync";
-import { chargeablePrice, priceChanges, slugify } from "../stripeCatalogue";
+import { badIdReason, chargeablePrice, priceChanges, slugify } from "../stripeCatalogue";
 import { bearerAuth } from "../schemas";
 import { stripeSecretKey } from "../stripe";
 import { type TicketType } from "../types";
@@ -66,7 +66,7 @@ async function syncProduct(actor: User, product: Stripe.Product, prices: Stripe.
 
       const id = product.metadata.typeId || slugify(product.name);
       if (!TYPE_ID.test(id)) {
-        return skip(`can't make a ticket type id from "${product.name}"; set metadata.typeId in Stripe`);
+        return skip(badIdReason("a ticket type", "typeId", product.metadata.typeId, product.name));
       }
       const ref = db.doc(`ticketTypes/${id}`);
       if ((await tx.get(ref)).exists) {

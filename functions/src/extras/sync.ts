@@ -3,7 +3,7 @@ import type Stripe from "stripe";
 
 import { audit } from "../audit/audit";
 import type { User } from "../auth";
-import { chargeablePrice, slugify } from "../stripeCatalogue";
+import { badIdReason, chargeablePrice, slugify } from "../stripeCatalogue";
 import type { Changes, SyncResult } from "../tickets/stripeSync";
 import type { Extra } from "../types";
 
@@ -38,7 +38,7 @@ export async function syncExtraProduct(actor: User, product: Stripe.Product): Pr
 
       const id = product.metadata.extraId || slugify(product.name);
       if (!EXTRA_ID.test(id)) {
-        return skip(`can't make an extra id from "${product.name}"; set metadata.extraId in Stripe`);
+        return skip(badIdReason("an extra", "extraId", product.metadata.extraId, product.name));
       }
       const ref = db.doc(`extras/${id}`);
       if ((await tx.get(ref)).exists) {
