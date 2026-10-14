@@ -32,16 +32,19 @@ beforeEach(async () => {
 });
 
 describe("the sale window in the catalog", () => {
-  it("tells the site whether each type can be bought right now", async () => {
+  it("lists only the types open right now, and shows staff the rest as not on sale", async () => {
     await seedTicketType("early", { salesEnd: hoursFromNow(-1) });
     await seedTicketType("regular", { salesStart: hoursFromNow(-1), salesEnd: hoursFromNow(24) });
     await seedTicketType("later", { salesStart: hoursFromNow(1) });
     await seedTicketType("always");
 
-    expect((await catalogEntry("early")).onSale).toBe(false);
-    expect((await catalogEntry("regular")).onSale).toBe(true);
-    expect((await catalogEntry("later")).onSale).toBe(false);
+    const listed = (await apiFetch("GET", "/ticket-types")).body.map((t: { id: string }) => t.id);
+    expect(listed.sort()).toEqual(["always", "regular"]);
     expect(await catalogEntry("always")).toMatchObject({ onSale: true, salesStart: null, salesEnd: null });
+
+    const all = (await apiFetch("GET", "/ticket-types/all", { token: staff.token })).body;
+    expect(Object.fromEntries(all.map((t: { id: string; onSale: boolean }) => [t.id, t.onSale])))
+      .toEqual({ early: false, regular: true, later: false, always: true });
   });
 });
 

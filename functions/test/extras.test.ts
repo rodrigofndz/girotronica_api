@@ -1,7 +1,9 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { apiFetch, auditEntries, createUser, resetEmulators, startApi, stopApi, type TestUser } from "./helpers";
+import {
+  apiFetch, auditEntries, createUser, resetEmulators, seedExtra, seedTicketType, startApi, stopApi, type TestUser,
+} from "./helpers";
 
 // Only the catalogue listing is faked; everything else about the Stripe class stays real
 const listProducts = vi.hoisted(() => vi.fn());
@@ -38,7 +40,7 @@ let admin: TestUser;
 let staff: TestUser;
 
 const sync = () => apiFetch("POST", "/ticket-types/sync", { token: admin.token });
-const listed = async () => (await apiFetch("GET", "/extras")).body;
+const listed = async () => (await apiFetch("GET", "/extras/all", { token: admin.token })).body;
 const edit = (id: string, body: Record<string, unknown>, token = admin.token) =>
   apiFetch("PATCH", `/extras/${id}`, { token, body });
 
@@ -161,5 +163,36 @@ describe("editing an extra", () => {
   it("is for admins only, and reports an unknown extra", async () => {
     expect((await edit("samarreta", { capacity: 1 }, staff.token)).status).toBe(403);
     expect((await edit("ghost", { capacity: 1 })).status).toBe(404);
+  });
+});
+
+describe("which extras the public catalog lists", () => {
+  const ids = async (path: string, token?: string) =>
+    (await apiFetch("GET", path, { token })).body.map((e: { id: string }) => e.id).sort();
+
+  beforeEach(async () => {
+    await seedTicketType("general", { extrasFrom: "general" });
+    await seedTicketType("lan", { extrasFrom: "lan", salesStart: new Date(Date.now() + 3600_000).toISOString() });
+    await seedExtra("tee", { groups: ["general"] });
+    await seedExtra("last-tee", { groups: ["general", "lan"], capacity: 1, sold: 1 });
+    await seedExtra("lan-tee", { groups: ["lan"] });
+    await seedExtra("unassigned", { groups: [] });
+  });
+
+  it("lists only extras offered with a type on sale, sold-out ones included", async () => {
+    expect(await ids("/extras")).toEqual(["last-tee", "tee"]);
+  });
+
+  it("lists none when the types on sale offer no extras", async () => {
+    await seedTicketType("general", { extrasFrom: null });
+
+    expect(await ids("/extras")).toEqual([]);
+  });
+
+  it("shows staff every extra, and keeps the list from users", async () => {
+    const user = await createUser("user@example.com");
+
+    expect(await ids("/extras/all", staff.token)).toEqual(["lan-tee", "last-tee", "tee", "unassigned"]);
+    expect((await apiFetch("GET", "/extras/all", { token: user.token })).status).toBe(403);
   });
 });

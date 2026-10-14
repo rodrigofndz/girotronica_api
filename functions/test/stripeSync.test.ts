@@ -76,7 +76,7 @@ describe("a new Stripe product", () => {
       category: "general", packSize: 1, entries: "once", extrasFrom: "general",
       description: null, features: [], disclaimer: null,
     });
-    const [listed] = (await apiFetch("GET", "/ticket-types")).body;
+    const [listed] = (await apiFetch("GET", "/ticket-types/all", { token: admin.token })).body;
     expect(listed).toMatchObject({ onSale: false, stripeProductId: "prod_pack" });
   });
 
@@ -207,7 +207,7 @@ describe("prices that change on a date", () => {
   const product = { id: "prod_lan", name: "Entrada LAN", default_price: eur("price_early", 2500) };
   const later = (id: string, amount: number, from: string, extra: Record<string, unknown> = {}) =>
     ({ ...eur(id, amount), product: "prod_lan", metadata: { from }, ...extra });
-  const listedType = async () => (await apiFetch("GET", "/ticket-types")).body[0];
+  const listedType = async () => (await apiFetch("GET", "/ticket-types/all", { token: admin.token })).body[0];
 
   beforeEach(() => catalogue([product]));
 

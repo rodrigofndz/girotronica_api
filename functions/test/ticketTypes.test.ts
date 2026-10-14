@@ -48,6 +48,35 @@ describe("the public catalog", () => {
   });
 });
 
+describe("what the public catalog leaves out", () => {
+  const ids = async (path: string, token?: string) =>
+    (await apiFetch("GET", path, { token })).body.map((t: { id: string }) => t.id).sort();
+
+  beforeEach(async () => {
+    await seedTicketType("on-sale");
+    await seedTicketType("sold-out", { capacity: 2, sold: 2 });
+    await seedTicketType("not-set-up", { days: [], capacity: 0 });
+  });
+
+  it("hides types not set up yet, but keeps sold-out ones", async () => {
+    expect(await ids("/ticket-types")).toEqual(["on-sale", "sold-out"]);
+  });
+
+  it("shows staff and admins every type", async () => {
+    const all = ["not-set-up", "on-sale", "sold-out"];
+
+    expect(await ids("/ticket-types/all", staff.token)).toEqual(all);
+    expect(await ids("/ticket-types/all", admin.token)).toEqual(all);
+  });
+
+  it("keeps the full list from users and anonymous callers", async () => {
+    const user = await createUser("user@example.com");
+
+    expect((await apiFetch("GET", "/ticket-types/all", { token: user.token })).status).toBe(403);
+    expect((await apiFetch("GET", "/ticket-types/all")).status).toBe(401);
+  });
+});
+
 describe("what the web may change", () => {
   beforeEach(async () => {
     await seedTicketType("general", { capacity: 5, sold: 2 });
