@@ -21,9 +21,9 @@ const stripeEvent = { stripeEventId: z.string() };
  * change, and name it in that route's `auditedAs(...)`.
  */
 export const AUDIT_ACTIONS = {
-  // Kept so entries from before the Stripe sync still read well; nothing writes it any more
+  // Also on entries from before types came from Stripe, when any type was made by hand
   "ticketType.create": {
-    description: "Ticket type created by hand (before types came from Stripe)",
+    description: "Free ticket type made in the admin, without a Stripe product",
     details: z.object({ fields: z.record(z.string(), z.unknown()) }),
   },
   "ticketType.stripeSync": {

@@ -95,6 +95,12 @@ const UpdateSchema = TicketTypeSchema.pick({
   .partial()
   .strict();
 
+// No price: a type made here is free (children's), and charging means a Stripe product instead
+const CreateSchema = UpdateSchema.extend({
+  id: z.string().regex(/^[a-z0-9-]+$/, "lowercase letters, digits and dashes only"),
+  name: z.string().trim().min(1),
+}).strict();
+
 const params = z.object({
   id: z.string().min(1).openapi({ param: { name: "id", in: "path" } }),
 });
@@ -279,6 +285,81 @@ adminTicketTypes.openapi(
     });
 
     return c.json(present(id, updated.merged, updated.pools), 200);
+  },
+);
+
+adminTicketTypes.openapi(
+  createRoute({
+    method: "post",
+    path: "/",
+    tags: ["Ticket types"],
+    summary: "Make a free ticket type",
+    description:
+      "Admin only. For tickets given away, like children's, so it needs no Stripe product. It's " +
+      "always free: to charge for a type, make it a Stripe product and sync instead. Takes the " +
+      "same settings as an update; without days and a capacity it isn't for sale yet. An online " +
+      "order can't hold only free tickets.",
+    security: bearerAuth,
+    ...auditedAs("ticketType.create"),
+    middleware: [requireAdmin] as const,
+    request: { body: { required: true, content: { "application/json": { schema: CreateSchema } } } },
+    responses: {
+      201: { description: "Created", content: { "application/json": { schema: TicketTypeSchema } } },
+      400: { description: "Invalid body, a price was sent, an unknown poolId, or the sale window ends before it starts" },
+      403: { description: "Caller is not admin" },
+      409: { description: "The id is taken" },
+    },
+  }),
+  async (c) => {
+    const { id, ...fields } = c.req.valid("json");
+    const db = getFirestore();
+    const ref = db.doc(`ticketTypes/${id}`);
+
+    // Same starting point as a type synced from Stripe, but free and with no Stripe link
+    const type: Omit<TicketType, "id"> = {
+      price: 0,
+      capacity: 0,
+      isLanParty: false,
+      days: [],
+      sold: 0,
+      stripeProductId: null,
+      stripePriceId: null,
+      priceChanges: [],
+      category: "general",
+      packSize: 1,
+      entries: "once",
+      extrasFrom: "general",
+      description: null,
+      features: [],
+      disclaimer: null,
+      ...fields,
+    };
+    if (!windowInOrder(type)) {
+      throw new HTTPException(400, { message: WINDOW_ORDER_MESSAGE });
+    }
+
+    const pools = await db.runTransaction(async (tx) => {
+      const [existing, pool] = await Promise.all([
+        tx.get(ref),
+        type.poolId ? tx.get(db.doc(`${POOLS_COLLECTION}/${type.poolId}`)) : undefined,
+      ]);
+      if (existing.exists) {
+        throw new HTTPException(409, { message: `the id "${id}" is taken by another ticket type` });
+      }
+      if (pool && !pool.exists) {
+        throw new HTTPException(400, { message: `unknown shared places: ${type.poolId}` });
+      }
+      tx.create(ref, type);
+      audit(tx, {
+        actor: c.get("user"),
+        action: "ticketType.create",
+        target: { id, label: type.name },
+        details: { fields: type },
+      });
+      return new Map(pool ? [[pool.id, { id: pool.id, ...pool.data() } as CapacityPool]] : []);
+    });
+
+    return c.json(present(id, type, pools), 201);
   },
 );
 
