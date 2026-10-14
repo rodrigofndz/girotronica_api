@@ -4,7 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
 
 import { audit, auditedAs } from "../audit/audit";
-import { requireAdmin, type Env } from "../auth";
+import { requireAdmin, requireStaff, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
 import { stripeSecretKey } from "../stripe";
 import { ENTRY_RULES, EXTRA_GROUPS, priceAt, TICKET_CATEGORIES, type TicketType, typeSettings } from "../types";
@@ -116,6 +116,10 @@ function present(id: string, type: Omit<TicketType, "id">) {
   };
 }
 
+const listTypes = async () =>
+  (await getFirestore().collection("ticketTypes").get()).docs
+    .map((d) => present(d.id, d.data() as Omit<TicketType, "id">));
+
 ticketTypes.openapi(
   createRoute({
     method: "get",
@@ -123,8 +127,9 @@ ticketTypes.openapi(
     tags: ["Ticket types"],
     summary: "List ticket types on sale",
     description:
-      "Public. Includes how many are left and whether each type is on sale right now, " +
-      "so the site can show what is sold out, coming soon or closed.",
+      "Public. Only the types on sale right now: days set and the sale window open. Sold-out " +
+      "ones stay, with nothing remaining; types not set up yet, not open yet or closed are left " +
+      "out. Staff and admins see them all in GET /ticket-types/all.",
     responses: {
       200: {
         description: "Ticket types",
@@ -132,13 +137,29 @@ ticketTypes.openapi(
       },
     },
   }),
-  async (c) => {
-    const snap = await getFirestore().collection("ticketTypes").get();
-    return c.json(
-      snap.docs.map((d) => present(d.id, d.data() as Omit<TicketType, "id">)),
-      200,
-    );
-  },
+  async (c) => c.json((await listTypes()).filter((type) => type.onSale), 200),
+);
+
+adminTicketTypes.openapi(
+  createRoute({
+    method: "get",
+    path: "/all",
+    tags: ["Ticket types"],
+    summary: "List every ticket type",
+    description:
+      "Staff or admin. Every type, on sale or not: not set up yet, not open yet or closed; " +
+      "`onSale` says which.",
+    security: bearerAuth,
+    middleware: [requireStaff] as const,
+    responses: {
+      200: {
+        description: "Ticket types",
+        content: { "application/json": { schema: z.array(TicketTypeSchema) } },
+      },
+      403: { description: "Caller is not staff or admin" },
+    },
+  }),
+  async (c) => c.json(await listTypes(), 200),
 );
 
 adminTicketTypes.openapi(

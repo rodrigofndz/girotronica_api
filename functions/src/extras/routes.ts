@@ -3,9 +3,10 @@ import { getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
 import { audit, auditedAs } from "../audit/audit";
-import { requireAdmin, type Env } from "../auth";
+import { requireAdmin, requireStaff, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
-import { EXTRA_GROUPS, type Extra } from "../types";
+import { isOnSale } from "../tickets/capacity";
+import { EXTRA_GROUPS, type Extra, type TicketType, typeSettings } from "../types";
 
 export const extras = new OpenAPIHono<Env>();
 export const adminExtras = new OpenAPIHono<Env>();
@@ -55,6 +56,10 @@ function present(id: string, extra: Omit<Extra, "id">) {
   };
 }
 
+const listExtras = async () =>
+  (await getFirestore().collection("extras").get()).docs
+    .map((d) => present(d.id, d.data() as Omit<Extra, "id">));
+
 extras.openapi(
   createRoute({
     method: "get",
@@ -62,16 +67,40 @@ extras.openapi(
     tags: ["Extras"],
     summary: "List extras",
     description:
-      "Public. Every extra with what's left; a ticket offers those whose `groups` include its " +
-      "type's `extrasFrom`. Extras with no groups aren't offered yet.",
+      "Public. Only the extras some ticket type on sale offers: a ticket offers those whose " +
+      "`groups` include its type's `extrasFrom`. Sold-out ones stay, with nothing remaining. " +
+      "Staff and admins see them all in GET /extras/all.",
     responses: {
       200: { description: "Extras", content: { "application/json": { schema: z.array(ExtraSchema) } } },
     },
   }),
   async (c) => {
-    const snap = await getFirestore().collection("extras").get();
-    return c.json(snap.docs.map((d) => present(d.id, d.data() as Omit<Extra, "id">)), 200);
+    const types = await getFirestore().collection("ticketTypes").get();
+    const offered = new Set(types.docs
+      .map((d) => d.data() as TicketType)
+      .filter((type) => isOnSale(type))
+      .map((type) => typeSettings(type).extrasFrom));
+
+    const listed = (await listExtras()).filter((extra) => extra.groups.some((group) => offered.has(group)));
+    return c.json(listed, 200);
   },
+);
+
+adminExtras.openapi(
+  createRoute({
+    method: "get",
+    path: "/all",
+    tags: ["Extras"],
+    summary: "List every extra",
+    description: "Staff or admin. Every extra, offered with a ticket type on sale or not.",
+    security: bearerAuth,
+    middleware: [requireStaff] as const,
+    responses: {
+      200: { description: "Extras", content: { "application/json": { schema: z.array(ExtraSchema) } } },
+      403: { description: "Caller is not staff or admin" },
+    },
+  }),
+  async (c) => c.json(await listExtras(), 200),
 );
 
 adminExtras.openapi(
