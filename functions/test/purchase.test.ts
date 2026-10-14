@@ -386,7 +386,7 @@ describe("the confirmation page's view of an order", () => {
     expect(view.body).toEqual({
       id: res.body.orderId, status: "pending", total: 3500 + 900 + 1500,
       tickets: expect.arrayContaining([
-        { id: expect.any(String), typeId: "general", status: "pending", holderName: "Anna Puig", days: ["2026-11-20"],
+        { id: expect.any(String), typeId: "general", typeName: "general", status: "pending", holderName: "Anna Puig", days: ["2026-11-20"],
           extras: [{ extraId: "samarreta", name: "samarreta", option: "M" }] },
       ]),
     });

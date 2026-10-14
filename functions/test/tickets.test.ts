@@ -145,8 +145,37 @@ describe("own tickets", () => {
     const res = await apiFetch("GET", "/tickets", { token: attendee.token });
 
     expect(Object.keys(res.body[0]).sort()).toEqual(
-      ["checkins", "code", "days", "holderName", "id", "typeId"],
+      ["checkins", "code", "days", "holderName", "id", "isLanParty", "typeId", "typeName"],
     );
+  });
+});
+
+describe("own tickets' type details", () => {
+  const own = (typeId: string, isLanParty = false) => getFirestore().collection("tickets").add({
+    uid: attendee.uid, typeId, status: "active", code: `code-${typeId}`,
+    holderName: "Me", holderEmail: "attendee@example.com", paymentMethod: "stripe",
+    soldBy: null, purchasedAt: new Date(), days: ["2026-11-20"], isLanParty, checkins: {},
+  });
+
+  // The public catalog drops a type once its sales close, so the name can't come from there
+  it("names the type even once its sales have closed, and gives null for a type that's gone", async () => {
+    await seedTicketType("friday", { name: "Divendres", salesEnd: new Date(Date.now() - 3600_000).toISOString() });
+    await own("friday");
+    await own("deleted");
+
+    const res = await apiFetch("GET", "/tickets", { token: attendee.token });
+
+    expect(Object.fromEntries(res.body.map((t: { typeId: string; typeName: string | null }) => [t.typeId, t.typeName])))
+      .toEqual({ friday: "Divendres", deleted: null });
+  });
+
+  it("says whether it's a LAN party ticket from the ticket itself, once the type has closed", async () => {
+    await seedTicketType("lan", { isLanParty: false, salesEnd: new Date(Date.now() - 3600_000).toISOString() });
+    await own("lan", true);
+
+    const [ticket] = (await apiFetch("GET", "/tickets", { token: attendee.token })).body;
+
+    expect(ticket.isLanParty).toBe(true);
   });
 });
 
