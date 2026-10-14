@@ -4,7 +4,7 @@ import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { audit, auditedAs } from "../audit/audit";
 import { requireStaff, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
-import { EVENT_TIMEZONE, TICKET_STATUSES, type Ticket, type UserProfile } from "../types";
+import { EVENT_TIMEZONE, PAYMENT_METHODS, TICKET_STATUSES, type Ticket, type UserProfile } from "../types";
 
 export const checkin = new OpenAPIHono<Env>();
 
@@ -33,12 +33,20 @@ const ProblemSchema = z.discriminatedUnion("reason", [
 ]);
 type Problem = z.infer<typeof ProblemSchema>;
 
+// How it was paid, as in the staff lookup
+const PaymentMethodSchema = z.enum(PAYMENT_METHODS).openapi({
+  description: "stripe: bought online; cash or card_terminal: sold at the door; assigned: given by an admin",
+});
+
 const CheckinResultSchema = z.discriminatedUnion("result", [
-  z.object({ result: z.literal("valid"), holderName: z.string(), typeId: z.string() }),
+  z.object({
+    result: z.literal("valid"), holderName: z.string(), typeId: z.string(), paymentMethod: PaymentMethodSchema,
+  }),
   z.object({
     result: z.literal("rejected"),
     holderName: z.string().nullable().openapi({ description: "Null when the code matched no ticket" }),
     typeId: z.string().nullable(),
+    paymentMethod: PaymentMethodSchema.nullable(),
     problems: z.array(ProblemSchema).min(1),
   }),
 ]);
@@ -96,7 +104,7 @@ checkin.openapi(checkinRoute, async (c) => {
     });
     await batch.commit();
 
-    return c.json({ result: "rejected" as const, holderName: null, typeId: null, problems: [{ reason: "not_found" as const }] }, 200);
+    return c.json({ result: "rejected" as const, holderName: null, typeId: null, paymentMethod: null, problems: [{ reason: "not_found" as const }] }, 200);
   }
 
   const ref = snap.docs[0].ref;
@@ -139,7 +147,9 @@ checkin.openapi(checkinRoute, async (c) => {
         target,
         details: { day, reasons: problems.map((p) => p.reason) },
       });
-      return { result: "rejected" as const, holderName: t.holderName, typeId: t.typeId, problems };
+      return {
+        result: "rejected" as const, holderName: t.holderName, typeId: t.typeId, paymentMethod: t.paymentMethod, problems,
+      };
     }
 
     tx.update(ref, {
@@ -151,6 +161,7 @@ checkin.openapi(checkinRoute, async (c) => {
       result: "valid" as const,
       holderName: t.holderName,
       typeId: t.typeId,
+      paymentMethod: t.paymentMethod,
     };
   });
 

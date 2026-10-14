@@ -102,7 +102,7 @@ describe("check-in", () => {
 
   it("reports an unknown code as not found", async () => {
     expect((await scan("no-such-code")).body).toEqual({
-      result: "rejected", holderName: null, typeId: null, problems: [{ reason: "not_found" }],
+      result: "rejected", holderName: null, typeId: null, paymentMethod: null, problems: [{ reason: "not_found" }],
     });
   });
 
