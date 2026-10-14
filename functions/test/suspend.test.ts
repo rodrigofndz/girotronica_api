@@ -3,7 +3,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  apiFetch, createUser, resetEmulators, seedTicketType, startApi, stopApi, type TestUser,
+  apiFetch, auditEntries, createUser, resetEmulators, seedTicketType, soldCount, startApi, stopApi, type TestUser,
 } from "./helpers";
 
 const AUTH = `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1`;
@@ -98,6 +98,70 @@ describe("suspending an account", () => {
 
     expect(scan.body.result).toBe("rejected");
     expect((await ref.get()).data()!.status).toBe("cancelled");
+  });
+});
+
+describe("the tickets a suspension cancels", () => {
+  const ticketOf = (fields: Record<string, unknown>) =>
+    getFirestore().collection("tickets").add({
+      uid: null, typeId: "general", status: "active", code: `code-${Math.random()}`,
+      holderName: "Someone", holderEmail: "someone@example.com", paymentMethod: "stripe",
+      soldBy: null, purchasedAt: new Date(), days: ["2026-11-20"], isLanParty: false,
+      packId: null, checkins: {}, ...fields,
+    });
+  const statusOf = async (ref: FirebaseFirestore.DocumentReference) => (await ref.get()).data()!.status;
+
+  beforeEach(() => seedTicketType("general", { capacity: 10, sold: 5 }));
+
+  it("cancels every ticket linked to the account or in its email, paid or not, and frees their places", async () => {
+    const own = await ticketOf({ uid: user.uid, holderEmail: "user@example.com" });
+    const friendsInTheirOrder = await ticketOf({ uid: user.uid, holderEmail: "friend@example.com" });
+    const boughtAsGuest = await ticketOf({ holderEmail: "user@example.com" });
+    const unpaid = await ticketOf({ uid: user.uid, status: "pending" });
+    const someoneElses = await ticketOf({});
+
+    const res = await suspend(user.uid, staff);
+
+    expect(res.body.cancelledTickets).toBe(4);
+    for (const ref of [own, friendsInTheirOrder, boughtAsGuest, unpaid]) {
+      expect(await statusOf(ref)).toBe("cancelled");
+    }
+    expect(await statusOf(someoneElses)).toBe("active");
+    expect(await soldCount("general")).toBe(1);
+  });
+
+  it("logs each cancelled ticket and the count on the suspension", async () => {
+    const own = await ticketOf({ uid: user.uid });
+
+    await suspend(user.uid, staff);
+
+    expect(await auditEntries("ticket.cancelOnSuspend")).toEqual([expect.objectContaining({
+      actorUid: staff.uid, targetId: own.id, details: { uid: user.uid, previousStatus: "active" },
+    })]);
+    expect((await auditEntries("user.suspend"))[0].details).toEqual({ cancelledTickets: 1 });
+  });
+
+  it("doesn't bring them back on reactivating, nor cancel anything twice", async () => {
+    const own = await ticketOf({ uid: user.uid });
+    await ticketOf({ uid: user.uid, status: "cancelled" });
+    await suspend(user.uid, staff);
+
+    expect((await suspend(user.uid, staff)).body.cancelledTickets).toBe(0);
+    expect((await reactivate(user.uid, staff)).body.cancelledTickets).toBe(0);
+    expect(await statusOf(own)).toBe("cancelled");
+    expect(await soldCount("general")).toBe(4);
+  });
+
+  it("cancels only their ticket in a pack, keeping the pack's place until all its tickets go", async () => {
+    await seedTicketType("pack", { packSize: 2, capacity: 5, sold: 1 });
+    const theirs = await ticketOf({ typeId: "pack", uid: user.uid, packId: "pack-1" });
+    const teammate = await ticketOf({ typeId: "pack", holderEmail: "mate@example.com", packId: "pack-1" });
+
+    await suspend(user.uid, staff);
+
+    expect(await statusOf(theirs)).toBe("cancelled");
+    expect(await statusOf(teammate)).toBe("active");
+    expect(await soldCount("pack")).toBe(1);
   });
 });
 
