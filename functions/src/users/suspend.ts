@@ -6,6 +6,7 @@ import { HTTPException } from "hono/http-exception";
 import { audit, auditedAs } from "../audit/audit";
 import { requireStaff, type Env, type User } from "../auth";
 import { bearerAuth, profileResponse, UserProfileSchema } from "../schemas";
+import { cancelInTransaction } from "../tickets/cancel";
 import type { UserProfile, UserProfileWrite } from "../types";
 
 export const suspension = new OpenAPIHono<Env>();
@@ -17,7 +18,15 @@ const params = z.object({
 const responses = {
   200: {
     description: "Updated user profile",
-    content: { "application/json": { schema: UserProfileSchema } },
+    content: {
+      "application/json": {
+        schema: UserProfileSchema.extend({
+          cancelledTickets: z.int().nonnegative().openapi({
+            description: "Tickets cancelled by this call; 0 when reactivating or already suspended",
+          }),
+        }),
+      },
+    },
   },
   403: { description: "Plain users can't do this, and only admins can act on staff" },
   404: { description: "User not found" },
@@ -25,8 +34,24 @@ const responses = {
 } as const;
 
 /**
+ * Every ticket that isn't cancelled yet and is linked to the account (bought while signed in,
+ * friends' tickets in the same order included, or assigned to it) or held in its email
+ * (bought as a guest, by them or for them). Reads only, so it can go first in a transaction.
+ */
+async function ticketsOfAccount(tx: FirebaseFirestore.Transaction, uid: string, email: string | null) {
+  const tickets = getFirestore().collection("tickets");
+  const [linked, held] = await Promise.all([
+    tx.get(tickets.where("uid", "==", uid)),
+    email ? tx.get(tickets.where("holderEmail", "==", email)) : null,
+  ]);
+  const byId = new Map([...linked.docs, ...(held?.docs ?? [])].map((doc) => [doc.id, doc]));
+  return [...byId.values()];
+}
+
+/**
  * Staff can suspend plain users, only admins can suspend staff, nobody can suspend an admin
- * or themselves; reactivating follows the same rules. Tickets already issued stay valid.
+ * or themselves; reactivating follows the same rules. Suspending cancels the account's
+ * tickets (see ticketsOfAccount), freeing their places; reactivating doesn't bring them back.
  */
 async function setSuspended(actor: User, uid: string, suspended: boolean) {
   if (actor.uid === uid) {
@@ -36,7 +61,7 @@ async function setSuspended(actor: User, uid: string, suspended: boolean) {
   const db = getFirestore();
   const ref = db.doc(`users/${uid}`);
 
-  const profile = await db.runTransaction(async (tx) => {
+  const outcome = await db.runTransaction(async (tx) => {
     const current = (await tx.get(ref)).data() as UserProfile | undefined;
 
     if (!current) {
@@ -49,7 +74,22 @@ async function setSuspended(actor: User, uid: string, suspended: boolean) {
       throw new HTTPException(403, { message: "only admins can suspend or reactivate staff" });
     }
 
+    let cancelledTickets = 0;
     if ((current.suspended ?? false) !== suspended) {
+      // Reads first: a transaction can't read after it writes
+      const cancelled = suspended
+        ? await cancelInTransaction(tx, await ticketsOfAccount(tx, uid, current.email))
+        : [];
+      cancelledTickets = cancelled.length;
+      for (const { id, ticket } of cancelled) {
+        audit(tx, {
+          actor,
+          action: "ticket.cancelOnSuspend",
+          target: { id, label: ticket.holderName },
+          details: { uid, previousStatus: ticket.status },
+        });
+      }
+
       tx.update(
         ref,
         (suspended
@@ -60,10 +100,10 @@ async function setSuspended(actor: User, uid: string, suspended: boolean) {
         actor,
         action: suspended ? "user.suspend" : "user.reactivate",
         target: { id: uid, label: current.email },
-        details: {},
+        details: suspended ? { cancelledTickets } : {},
       });
     }
-    return { ...current, suspended };
+    return { profile: { ...current, suspended }, cancelledTickets };
   });
 
   // The profile flag already blocks the API; this also stops new sign-ins and ends open
@@ -79,7 +119,7 @@ async function setSuspended(actor: User, uid: string, suspended: boolean) {
     if ((err as { code?: string }).code !== "auth/user-not-found") throw err;
   }
 
-  return profileResponse(uid, profile);
+  return { ...profileResponse(uid, outcome.profile), cancelledTickets: outcome.cancelledTickets };
 }
 
 suspension.openapi(
@@ -89,10 +129,12 @@ suspension.openapi(
     tags: ["Users"],
     summary: "Suspend an account",
     description:
-      "Staff or admin. Blocks the account from the API immediately and disables its sign-in. " +
-      "Tickets already issued stay valid unless an admin cancels them.",
+      "Staff or admin. Blocks the account from the API immediately and disables its sign-in, " +
+      "and cancels every ticket linked to the account or held in its email, paid or not, " +
+      "including friends' tickets bought in the same order; their places go back on sale. " +
+      "Nothing is refunded: refund paid ones in Stripe by hand. Reactivating doesn't restore them.",
     security: bearerAuth,
-    ...auditedAs("user.suspend"),
+    ...auditedAs("user.suspend", "ticket.cancelOnSuspend"),
     middleware: [requireStaff] as const,
     request: { params },
     responses,

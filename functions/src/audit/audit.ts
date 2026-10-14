@@ -76,6 +76,10 @@ export const AUDIT_ACTIONS = {
     description: "Cancelled by an admin",
     details: z.object({ previousStatus: z.enum(TICKET_STATUSES) }),
   },
+  "ticket.cancelOnSuspend": {
+    description: "Cancelled because the account it's linked to, or its holder's account, was suspended",
+    details: z.object({ uid: z.string(), previousStatus: z.enum(TICKET_STATUSES) }),
+  },
   "ticket.purchase": {
     description: "Bought online; waiting for payment, or active at once when the order is free",
     // `price` is the type's (per ticket, or per whole pack); orderId and extras since guest orders
@@ -119,8 +123,9 @@ export const AUDIT_ACTIONS = {
     details: z.object({}),
   },
   "user.suspend": {
-    description: "Account suspended",
-    details: z.object({}),
+    description: "Account suspended, cancelling its tickets",
+    // Absent on entries from before suspending cancelled tickets
+    details: z.object({ cancelledTickets: z.int().optional() }),
   },
   "user.reactivate": {
     description: "Account reactivated",

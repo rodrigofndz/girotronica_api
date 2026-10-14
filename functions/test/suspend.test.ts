@@ -83,7 +83,7 @@ describe("suspending an account", () => {
     expect((await profile(user.uid)).suspendedBy).toBe(staff.uid);
   });
 
-  it("leaves tickets already issued valid at the door", async () => {
+  it("cancels the account's tickets, so they're refused at the door", async () => {
     await seedTicketType("general", { days: [new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid" }).format(new Date())] });
     const ref = await getFirestore().collection("tickets").add({
       uid: user.uid, typeId: "general", status: "active", code: "kept-code",
@@ -96,8 +96,8 @@ describe("suspending an account", () => {
 
     const scan = await apiFetch("POST", "/tickets/checkin", { token: staff.token, body: { code: "kept-code" } });
 
-    expect(scan.body.result).toBe("valid");
-    expect((await ref.get()).data()!.status).toBe("active");
+    expect(scan.body.result).toBe("rejected");
+    expect((await ref.get()).data()!.status).toBe("cancelled");
   });
 });
 
