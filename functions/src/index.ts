@@ -18,6 +18,7 @@ import { ticketLookup } from "./tickets/lookup";
 import { ticketCancel } from "./tickets/cancel";
 import { ticketQr } from "./tickets/qr";
 import { ticketTypeSync } from "./tickets/stripeSync";
+import { capacityPools } from "./tickets/pools";
 import { adminTicketTypes, ticketTypes } from "./tickets/ticketTypes";
 import { tickets } from "./tickets/tickets";
 import { orders } from "./orders/routes";
@@ -84,6 +85,7 @@ app.use("*", requireAuth);
 app.route("/ticket-types", adminTicketTypes);
 app.route("/ticket-types", ticketTypeSync);
 app.route("/extras", adminExtras);
+app.route("/capacity-pools", capacityPools);
 
 app.route("/me", me);
 

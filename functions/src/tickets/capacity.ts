@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
-import { priceAt, type Ticket, type TicketType, typeSettings } from "../types";
+import { type CapacityPool, priceAt, type Ticket, type TicketType, typeSettings } from "../types";
+
+export const POOLS_COLLECTION = "capacityPools";
 
 /**
  * Whether a type can be sold at `now`: it grants at least one day (a type just synced from
@@ -24,7 +26,8 @@ export function isOnSale(
  * Loads the requested ticket types, refuses the sale if any of them is outside its sale
  * window or would go over capacity, and reserves the slots by bumping their `sold` counters.
  * Items are tickets, one per person; a pack type is reserved in whole units of `packSize`
- * tickets, and that's what its capacity and `sold` count. The types come back at their current
+ * tickets, and that's what its capacity and `sold` count. Types that share places (poolId) also
+ * take one place per ticket from their pool. The types come back at their current
  * price (see priceAt). Must run inside a transaction so
  * two buyers can't take the same last slot.
  */
@@ -79,11 +82,63 @@ export async function reserveCapacity(
     }
   }
 
+  // Shared places count people, so a pack takes one per ticket
+  const people = new Map<string, number>();
+  for (const [typeId, tickets] of wanted) {
+    const poolId = types.get(typeId)!.poolId;
+    if (poolId) people.set(poolId, (people.get(poolId) ?? 0) + tickets);
+  }
+  await takePlaces(tx, people);
+
   for (const [typeId, count] of units) {
     tx.update(db.doc(`ticketTypes/${typeId}`), { sold: FieldValue.increment(count) });
   }
 
   return types;
+}
+
+/**
+ * Takes `count` places from each pool, or refuses the sale if one hasn't enough left. Reads
+ * the pools, so call it before the transaction writes anything.
+ */
+export async function takePlaces(
+  tx: FirebaseFirestore.Transaction,
+  people: Map<string, number>,
+): Promise<void> {
+  if (people.size === 0) return;
+  const db = getFirestore();
+  const docs = await tx.getAll(...[...people.keys()].map((id) => db.doc(`${POOLS_COLLECTION}/${id}`)));
+
+  for (const doc of docs) {
+    const pool = doc.data() as Omit<CapacityPool, "id"> | undefined;
+    // Deleting a pool that types use is refused, so this means the data was changed by hand
+    if (!pool) throw new HTTPException(409, { message: `not on sale: its shared places ${doc.id} are missing` });
+    const count = people.get(doc.id)!;
+    if (pool.sold + count > pool.capacity) {
+      throw new HTTPException(409, {
+        message: `sold out: ${pool.name} has ${Math.max(pool.capacity - pool.sold, 0)} places left, asked for ${count}`,
+      });
+    }
+  }
+
+  for (const [poolId, count] of people) {
+    tx.update(db.doc(`${POOLS_COLLECTION}/${poolId}`), { sold: FieldValue.increment(count) });
+  }
+}
+
+/** Gives back the shared places of tickets that stop counting: one per ticket, packs included. */
+export function releasePlaces(
+  tx: FirebaseFirestore.Transaction,
+  tickets: Pick<Ticket, "poolId">[],
+): void {
+  const db = getFirestore();
+  const counts = new Map<string, number>();
+  for (const { poolId } of tickets) {
+    if (poolId) counts.set(poolId, (counts.get(poolId) ?? 0) + 1);
+  }
+  for (const [poolId, count] of counts) {
+    tx.update(db.doc(`${POOLS_COLLECTION}/${poolId}`), { sold: FieldValue.increment(-count) });
+  }
 }
 
 /** Frees slots when tickets stop counting, i.e. cancelled or expired. */

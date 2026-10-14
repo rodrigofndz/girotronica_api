@@ -8,6 +8,7 @@ import { audit, auditedAs } from "../audit/audit";
 import { requireAdmin, type Env } from "../auth";
 import { queueTicketEmails } from "../mail";
 import { bearerAuth } from "../schemas";
+import { takePlaces } from "../tickets/capacity";
 import { type TicketType, type TicketWrite, type UserProfile, typeSettings } from "../types";
 
 export const ticketAssignment = new OpenAPIHono<Env>();
@@ -83,6 +84,8 @@ ticketAssignment.openapi(
         });
       }
 
+      if (type.poolId) await takePlaces(tx, new Map([[type.poolId, 1]]));
+
       const ticket = {
         uid,
         typeId,
@@ -97,6 +100,7 @@ ticketAssignment.openapi(
         isLanParty: type.isLanParty,
         entries: settings.entries,
         packId: null,
+        poolId: type.poolId ?? null,
         checkins: {},
       } satisfies TicketWrite;
 

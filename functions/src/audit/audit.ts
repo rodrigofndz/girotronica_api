@@ -6,7 +6,7 @@ import { PAYMENT_METHODS, TICKET_STATUSES, type Role } from "../types";
 
 export const AUDIT_COLLECTION = "auditLog";
 
-export const AUDIT_TARGETS = ["ticket", "ticketType", "extra", "user"] as const;
+export const AUDIT_TARGETS = ["ticket", "ticketType", "extra", "user", "capacityPool"] as const;
 export type AuditTarget = (typeof AUDIT_TARGETS)[number];
 
 export const SCAN_REJECTIONS = ["already_used", "wrong_day", "invalid", "not_found"] as const;
@@ -53,6 +53,18 @@ export const AUDIT_ACTIONS = {
   "ticketType.delete": {
     description: "Ticket type deleted; `sold` is how many tickets it had then",
     details: z.object({ sold: z.int().optional() }),
+  },
+  "capacityPool.create": {
+    description: "Shared places created",
+    details: z.object({ name: z.string(), capacity: z.int() }),
+  },
+  "capacityPool.update": {
+    description: "Shared places edited; only the fields that changed",
+    details: z.object({ changes: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })) }),
+  },
+  "capacityPool.delete": {
+    description: "Shared places deleted",
+    details: z.object({ capacity: z.int() }),
   },
   "ticket.doorSale": {
     description: "Sold at the door",

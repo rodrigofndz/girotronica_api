@@ -13,7 +13,7 @@ import { loadExtras, releaseExtras, reserveExtras } from "../extras/stock";
 import { ONLINE_SALES_MODE } from "../features";
 import { EmailSchema } from "../schemas";
 import { stripeSecretKey } from "../stripe";
-import { packIds, releaseCapacity, reserveCapacity } from "../tickets/capacity";
+import { packIds, releaseCapacity, releasePlaces, reserveCapacity } from "../tickets/capacity";
 import {
   type Extra, type OrderWrite, type Ticket, type TicketExtra, type TicketType, type TicketWrite, typeSettings,
 } from "../types";
@@ -161,6 +161,7 @@ purchase.openapi(
           isLanParty: type.isLanParty,
           entries: typeSettings(type).entries,
           packId: packs[i],
+          poolId: type.poolId ?? null,
           checkins: {},
           orderId: orderRef.id,
           holder: {
@@ -223,6 +224,7 @@ purchase.openapi(
       // No checkout means nobody can ever pay for these, so they mustn't hold stock
       await db.runTransaction(async (tx) => {
         releaseCapacity(tx, unitsByType(attendees, types));
+        releasePlaces(tx, tickets);
         releaseExtras(tx, tickets as unknown as Ticket[]);
         tx.delete(orderRef);
         ticketRefs.forEach((ref, i) => {

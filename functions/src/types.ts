@@ -87,6 +87,19 @@ export type TicketType = {
   description?: string | null;   // short line under the title
   features?: string[];           // the "+ Més informació" bullet list
   disclaimer?: string | null;    // small print under the card
+  // Places it shares with other types, on top of its own capacity; absent or null: none
+  poolId?: string | null;
+};
+
+/**
+ * Places shared by several ticket types, e.g. the LAN seats both the LAN ticket and the LAN pack
+ * sell. Counted in people: each live ticket (pending or active) of its types takes one.
+ */
+export type CapacityPool = {
+  id: string;
+  name: string;
+  capacity: number;
+  sold: number;            // live tickets that took a place
 };
 
 export type PriceChange = {
@@ -154,6 +167,7 @@ export type Ticket = {
   // Denormalized from the type at sale time
   entries?: EntryRule;           // absent on older tickets: "once"
   packId?: string | null;        // shared by the tickets of one pack unit
+  poolId?: string | null;        // the shared places it took, if its type had them when sold
   checkins: Record<string, CheckIn>;  // keyed by ISO date
   // Set on tickets bought through an order (online); absent on door sales and older tickets
   orderId?: string;

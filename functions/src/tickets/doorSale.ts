@@ -88,6 +88,7 @@ doorSale.openapi(doorSaleRoute, async (c) => {
         isLanParty: type.isLanParty,
         entries: typeSettings(type).entries,
         packId: packs[i],
+        poolId: type.poolId ?? null,
         checkins: {},
       } satisfies TicketWrite);
       audit(tx, {

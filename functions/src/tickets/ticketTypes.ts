@@ -7,8 +7,10 @@ import { audit, auditedAs } from "../audit/audit";
 import { requireAdmin, requireStaff, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
 import { stripeSecretKey } from "../stripe";
-import { ENTRY_RULES, EXTRA_GROUPS, priceAt, TICKET_CATEGORIES, type TicketType, typeSettings } from "../types";
-import { isOnSale } from "./capacity";
+import {
+  type CapacityPool, ENTRY_RULES, EXTRA_GROUPS, priceAt, TICKET_CATEGORIES, type TicketType, typeSettings,
+} from "../types";
+import { isOnSale, POOLS_COLLECTION } from "./capacity";
 
 export const ticketTypes = new OpenAPIHono<Env>();
 export const adminTicketTypes = new OpenAPIHono<Env>();
@@ -43,7 +45,9 @@ const TicketTypeSchema = z.object({
   salesStart: saleBound.optional().openapi({ description: "When sales open; null or absent means already open" }),
   salesEnd: saleBound.optional().openapi({ description: "When sales close (exclusive); null or absent means never" }),
   sold: z.int().nonnegative(),
-  remaining: z.int().nonnegative().nullable(),
+  remaining: z.int().nonnegative().nullable().openapi({
+    description: "Units still for sale, its shared places included (a pack needs packSize of them); null: unlimited",
+  }),
   onSale: z.boolean().openapi({
     description: "Whether it can be bought now: days set and the sale window open, by the server's clock",
   }),
@@ -61,6 +65,9 @@ const TicketTypeSchema = z.object({
   description: z.string().nullable().openapi({ description: "Shop card: short line under the title" }),
   features: z.array(z.string()).openapi({ description: "Shop card: the \"Més informació\" bullet list" }),
   disclaimer: z.string().nullable().openapi({ description: "Shop card: small print under the card" }),
+  poolId: z.string().nullable().openapi({
+    description: "Shared places it sells from as well as its own capacity (see /capacity-pools); null: none",
+  }),
 });
 
 /** Trimmed; an empty string means "no text" (null). */
@@ -77,7 +84,7 @@ const WINDOW_ORDER_MESSAGE = "salesStart must be before salesEnd";
 // Only checks the window when both ends are in the patch; the handler checks it against the stored type
 const UpdateSchema = TicketTypeSchema.pick({
   name: true, capacity: true, isLanParty: true, salesStart: true, salesEnd: true,
-  category: true, entries: true, extrasFrom: true, packSize: true,
+  category: true, entries: true, extrasFrom: true, packSize: true, poolId: true,
 })
   .extend({
     days: z.array(isoDate).min(1),
@@ -92,8 +99,12 @@ const params = z.object({
   id: z.string().min(1).openapi({ param: { name: "id", in: "path" } }),
 });
 
-function present(id: string, type: Omit<TicketType, "id">) {
+function present(id: string, type: Omit<TicketType, "id">, pools: Map<string, CapacityPool>) {
   const sold = type.sold ?? 0;
+  const own = type.capacity === null ? null : Math.max(type.capacity - sold, 0);
+  const pool = type.poolId ? pools.get(type.poolId) : undefined;
+  // A pack needs a place for each of its people
+  const shared = pool && Math.floor(Math.max(pool.capacity - pool.sold, 0) / typeSettings(type).packSize);
   const { price, next } = priceAt(type);
   return {
     id,
@@ -106,19 +117,26 @@ function present(id: string, type: Omit<TicketType, "id">) {
     salesStart: type.salesStart ?? null,
     salesEnd: type.salesEnd ?? null,
     sold,
-    remaining: type.capacity === null ? null : Math.max(type.capacity - sold, 0),
+    remaining: shared === undefined ? own : own === null ? shared : Math.min(own, shared),
     onSale: isOnSale(type),
     stripeProductId: type.stripeProductId ?? null,
     ...typeSettings(type),
     description: type.description ?? null,
     features: type.features ?? [],
     disclaimer: type.disclaimer ?? null,
+    poolId: type.poolId ?? null,
   };
 }
 
-const listTypes = async () =>
-  (await getFirestore().collection("ticketTypes").get()).docs
-    .map((d) => present(d.id, d.data() as Omit<TicketType, "id">));
+const listTypes = async () => {
+  const db = getFirestore();
+  const [types, pools] = await Promise.all([
+    db.collection("ticketTypes").get(),
+    db.collection(POOLS_COLLECTION).get(),
+  ]);
+  const byId = new Map(pools.docs.map((d) => [d.id, { id: d.id, ...d.data() } as CapacityPool]));
+  return types.docs.map((d) => present(d.id, d.data() as Omit<TicketType, "id">, byId));
+};
 
 ticketTypes.openapi(
   createRoute({
@@ -172,7 +190,8 @@ adminTicketTypes.openapi(
       "Admin only. The price can't be changed here: change it in Stripe and sync. " +
       "Capacity cannot go below what is already sold; set it equal to `sold` to stop sales. " +
       "Changing `days`, `isLanParty` or `entries` does not affect tickets already issued; " +
-"`packSize` can't change once units are sold, since they were sold as packs of the old size. " +
+"`packSize` can't change once units are sold, since they were sold as packs of the old size; " +
+      "nor can `poolId`, since its tickets give their places back to the pool they took them from. " +
       "Send null for `salesStart` or `salesEnd` to remove that bound.",
     security: bearerAuth,
     ...auditedAs("ticketType.update"),
@@ -186,10 +205,10 @@ adminTicketTypes.openapi(
         description: "Updated",
         content: { "application/json": { schema: TicketTypeSchema } },
       },
-      400: { description: "Invalid body, or the sale window would end before it starts" },
+      400: { description: "Invalid body, an unknown poolId, or the sale window would end before it starts" },
       403: { description: "Caller is not admin" },
       404: { description: "No such ticket type" },
-      409: { description: "Capacity is below the number already sold, or a pack size change after sales" },
+      409: { description: "Capacity is below the number already sold, or a pack size or pool change after sales" },
     },
   }),
   async (c) => {
@@ -219,9 +238,24 @@ adminTicketTypes.openapi(
         });
       }
 
+      // Its tickets took places from the pool they were sold under and give them back there
+      const poolId = current.poolId ?? null;
+      if (patch.poolId !== undefined && patch.poolId !== poolId && sold > 0) {
+        throw new HTTPException(409, {
+          message: `${sold} units were sold with ${poolId ? `the shared places ${poolId}` : "no shared places"}, so that can't change`,
+        });
+      }
+
       const merged = { ...current, ...patch };
       if (!windowInOrder(merged)) {
         throw new HTTPException(400, { message: WINDOW_ORDER_MESSAGE });
+      }
+
+      const pools = new Map<string, CapacityPool>();
+      if (merged.poolId) {
+        const pool = (await tx.get(db.doc(`${POOLS_COLLECTION}/${merged.poolId}`))).data();
+        if (!pool) throw new HTTPException(400, { message: `unknown shared places: ${merged.poolId}` });
+        pools.set(merged.poolId, { id: merged.poolId, ...pool } as CapacityPool);
       }
 
       tx.update(ref, patch);
@@ -241,10 +275,10 @@ adminTicketTypes.openapi(
         });
       }
 
-      return merged;
+      return { merged, pools };
     });
 
-    return c.json(present(id, updated), 200);
+    return c.json(present(id, updated.merged, updated.pools), 200);
   },
 );
 
