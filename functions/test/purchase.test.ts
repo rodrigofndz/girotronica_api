@@ -375,6 +375,33 @@ describe("Stripe's answers about an order", () => {
   });
 });
 
+describe("shared places", () => {
+  const placesTaken = async () => (await getFirestore().doc("capacityPools/lan").get()).data()!.sold;
+
+  beforeEach(async () => {
+    await getFirestore().doc("capacityPools/lan").set({ name: "LAN", capacity: 3, sold: 0 });
+    await seedTicketType("entrada-lan-party", { capacity: null, price: 3500, stripePriceId: "price_lan", poolId: "lan" });
+  });
+
+  it("takes them online, and gives them back when the checkout expires", async () => {
+    const res = await buyOnline([lan(), lan({ name: "Biel Puig" })]);
+    expect(await placesTaken()).toBe(2);
+    expect((await buyOnline([lan(), lan()])).body).toBe("sold out: LAN has 1 places left, asked for 2");
+
+    await sendStripeEvent("checkout.session.expired", { id: "cs_test_1", object: "checkout.session", metadata: { orderId: res.body.orderId } });
+
+    expect(await placesTaken()).toBe(0);
+  });
+
+  it("gives them back when Stripe can't start the checkout", async () => {
+    createSession.mockReset();
+    createSession.mockRejectedValue(new Error("stripe is down"));
+
+    expect((await buyOnline([lan()])).status).toBe(502);
+    expect(await placesTaken()).toBe(0);
+  });
+});
+
 describe("the confirmation page's view of an order", () => {
   it("shows status, total and tickets, but no codes, emails or personal details", async () => {
     await seedExtra("samarreta", { options: ["M"] });
