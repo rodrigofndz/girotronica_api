@@ -1,7 +1,7 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  apiFetch, createUser, resetEmulators, seedTicketType, startApi, stopApi, type TestUser,
+  apiFetch, auditEntries, createUser, resetEmulators, seedTicketType, startApi, stopApi, type TestUser,
 } from "./helpers";
 
 let admin: TestUser;
@@ -82,11 +82,11 @@ describe("what the web may change", () => {
     await seedTicketType("general", { capacity: 5, sold: 2 });
   });
 
-  // Types come from the Stripe sync, which is the only place a price is set
-  it("can't create a type", async () => {
+  // A price is only ever set in Stripe; a type made here is free
+  it("can't make a type with a price", async () => {
     const res = await apiFetch("POST", "/ticket-types", { token: admin.token, body: valid });
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(400);
   });
 
   it.each([
@@ -178,5 +178,59 @@ describe("deleting a type", () => {
 
   it("reports an unknown type", async () => {
     expect((await apiFetch("DELETE", "/ticket-types/ghost", { token: admin.token })).status).toBe(404);
+  });
+});
+
+describe("free ticket types made in the admin", () => {
+  const create = (body: Record<string, unknown>, token = admin.token) =>
+    apiFetch("POST", "/ticket-types", { token, body });
+  const kids = { id: "entrada-infants", name: "Infants", days: ["2026-11-20", "2026-11-21", "2026-11-22"], capacity: null };
+
+  it("makes one without Stripe, free, with the settings sent, and logs it", async () => {
+    const res = await create({ ...kids, disclaimer: "Sempre acompanyat d'un adult." });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      id: "entrada-infants", name: "Infants", price: 0, nextPrice: null, capacity: null, remaining: null,
+      days: kids.days, onSale: true, stripeProductId: null, category: "general", packSize: 1, entries: "once",
+      disclaimer: "Sempre acompanyat d'un adult.", poolId: null,
+    });
+    expect((await apiFetch("GET", "/ticket-types")).body.map((t: { id: string }) => t.id)).toEqual(["entrada-infants"]);
+    expect((await auditEntries("ticketType.create"))[0]).toMatchObject({ actorUid: admin.uid, targetId: "entrada-infants" });
+  });
+
+  it("isn't for sale until it has days and a capacity", async () => {
+    const res = await create({ id: "later", name: "Later" });
+
+    expect(res.body).toMatchObject({ days: [], capacity: 0, onSale: false });
+  });
+
+  it("is sold at the door for nothing", async () => {
+    await create(kids);
+
+    const res = await apiFetch("POST", "/tickets/door", {
+      token: staff.token,
+      body: { paymentMethod: "cash", items: [{ typeId: "entrada-infants", holderName: "Kid", holderEmail: "kid@example.com" }] },
+    });
+
+    expect(res.status).toBe(200);
+    expect((await auditEntries("ticket.doorSale"))[0].details).toMatchObject({ typeId: "entrada-infants", price: 0 });
+  });
+
+  it("refuses a taken id, a bad id, an unknown pool, a window out of order, and anyone but an admin", async () => {
+    await seedTicketType("general");
+
+    expect((await create({ ...kids, id: "general" })).status).toBe(409);
+    expect((await create({ ...kids, id: "Entrada Infants" })).status).toBe(400);
+    expect((await create({ ...kids, poolId: "nope" })).status).toBe(400);
+    expect((await create({ ...kids, salesStart: "2026-11-02T00:00:00Z", salesEnd: "2026-11-01T00:00:00Z" })).status).toBe(400);
+    expect((await create(kids, staff.token)).status).toBe(403);
+    expect((await apiFetch("GET", "/ticket-types/all", { token: admin.token })).body).toHaveLength(1);
+  });
+
+  it("can be deleted while nothing is sold, with no Stripe product to archive", async () => {
+    await create(kids);
+
+    expect((await apiFetch("DELETE", "/ticket-types/entrada-infants", { token: admin.token })).status).toBe(200);
   });
 });
