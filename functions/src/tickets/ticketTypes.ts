@@ -247,6 +247,16 @@ async function requireArchivedInStripe(productId: string): Promise<void> {
   }
 }
 
+/** Cancelling or refunding a ticket updates its type's sold counter, so the type must stay. */
+function requireNoSales(id: string, type: Omit<TicketType, "id">): void {
+  const sold = type.sold ?? 0;
+  if (sold > 0) {
+    throw new HTTPException(409, {
+      message: `${id} has ${sold} sold; set its capacity to ${sold} to stop sales instead`,
+    });
+  }
+}
+
 adminTicketTypes.openapi(
   createRoute({
     method: "delete",
@@ -254,10 +264,10 @@ adminTicketTypes.openapi(
     tags: ["Ticket types"],
     summary: "Delete a ticket type",
     description:
-      "Admin only. For now it deletes even a type with tickets sold (while testing); those tickets " +
-      "still work at the door but can no longer be cancelled or refunded through the API. A type " +
-      "synced from Stripe can only be deleted once its product is archived in Stripe, or the next " +
-      "sync would bring it back.",
+      "Admin only. A type with tickets sold can't be deleted, since cancelling or refunding " +
+      "them needs it; set its capacity to what's sold to stop sales instead. A type synced " +
+      "from Stripe can only be deleted once its product is archived in Stripe, or the next sync " +
+      "would bring it back.",
     security: bearerAuth,
     ...auditedAs("ticketType.delete"),
     middleware: [requireAdmin] as const,
@@ -266,7 +276,7 @@ adminTicketTypes.openapi(
       200: { description: "Deleted", content: { "application/json": { schema: z.object({ ok: z.boolean() }) } } },
       403: { description: "Caller is not admin" },
       404: { description: "No such ticket type" },
-      409: { description: "Its Stripe product is still active" },
+      409: { description: "It has tickets sold, or its Stripe product is still active" },
       502: { description: "Stripe could not be reached to check the product; nothing was deleted" },
     },
   }),
@@ -275,11 +285,14 @@ adminTicketTypes.openapi(
     const db = getFirestore();
     const ref = db.doc(`ticketTypes/${id}`);
 
+    // Checked before asking Stripe too, so a type that can't go anyway doesn't send the admin
+    // to archive its product
+    const stored = (await ref.get()).data() as Omit<TicketType, "id"> | undefined;
+    if (stored) requireNoSales(id, stored);
     // Asked before the transaction, since Stripe can't take part in it; the sold check below
     // still runs inside it
-    const linkedProduct = ((await ref.get()).data() as Omit<TicketType, "id"> | undefined)?.stripeProductId;
-    if (linkedProduct) {
-      await requireArchivedInStripe(linkedProduct);
+    if (stored?.stripeProductId) {
+      await requireArchivedInStripe(stored.stripeProductId);
     }
 
     await db.runTransaction(async (tx) => {
@@ -288,10 +301,7 @@ adminTicketTypes.openapi(
       if (!current) {
         throw new HTTPException(404, { message: "ticket type not found" });
       }
-      // TEMPORARY while testing: types with tickets sold can be deleted too. Those tickets keep
-      // their days so check-in still works, but cancelling one fails, since that updates this
-      // type's sold counter. Restore the refusal below before real sales:
-      //   if ((current.sold ?? 0) > 0) throw new HTTPException(409, { message: ... });
+      requireNoSales(id, current);
       tx.delete(ref);
       audit(tx, {
         actor: c.get("user"),

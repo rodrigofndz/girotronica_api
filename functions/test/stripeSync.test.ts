@@ -437,13 +437,14 @@ describe("deleting a synced type", () => {
     expect(await stored("pack")).toBeDefined();
   });
 
-  // Sales don't block deleting for now (testing), but the log keeps how many there were
-  it("deletes an archived type even with sales, recording how many", async () => {
-    retrieveProduct.mockResolvedValue({ id: "prod_pack", active: false });
+  it("refuses a type with sales without asking Stripe, so the admin isn't sent to archive it", async () => {
     await getFirestore().doc("ticketTypes/pack").update({ sold: 3 });
 
-    expect((await remove()).status).toBe(200);
-    expect((await auditEntries("ticketType.delete"))[0].details).toEqual({ sold: 3 });
+    const res = await remove();
+
+    expect(res.status).toBe(409);
+    expect(res.body).toContain("has 3 sold");
+    expect(retrieveProduct).not.toHaveBeenCalled();
   });
 
   it("doesn't ask Stripe about a type made by hand", async () => {

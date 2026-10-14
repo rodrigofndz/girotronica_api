@@ -127,13 +127,15 @@ describe("updating a type", () => {
 });
 
 describe("deleting a type", () => {
-  // Temporary while testing; the refusal comes back before real sales
-  it("deletes a type even when tickets exist for it, for now", async () => {
-    await seedTicketType("general", { capacity: 5, sold: 1 });
+  // Cancelling or refunding its tickets needs the type
+  it("refuses a type with tickets sold, saying how to stop sales instead", async () => {
+    await seedTicketType("general", { capacity: 5, sold: 2 });
 
     const res = await apiFetch("DELETE", "/ticket-types/general", { token: admin.token });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(409);
+    expect(res.body).toBe("general has 2 sold; set its capacity to 2 to stop sales instead");
+    expect((await apiFetch("GET", "/ticket-types")).body).toHaveLength(1);
   });
 
   it("removes an unused type", async () => {
