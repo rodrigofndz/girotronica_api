@@ -38,8 +38,9 @@ export type Extra = {
   groups: ExtraGroup[];       // which ticket types offer it (by their extrasFrom); empty: not offered
   capacity: number | null;    // total stock, null for unlimited
   sold?: number;
-  stripeProductId: string;
-  stripePriceId: string;
+  // Null on an extra made in the admin instead of Stripe, which is always free
+  stripeProductId: string | null;
+  stripePriceId: string | null;
 };
 
 export type UserProfile = {

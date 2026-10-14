@@ -270,7 +270,8 @@ function lineItems(
   for (const extra of extras.values()) {
     if (extra.price === 0) continue;
     const quantity = attendees.flatMap((a) => a.extras).filter((e) => e.extraId === extra.id).length;
-    items.push({ price: extra.stripePriceId, quantity });
+    // Only Stripe's extras can have a price, so a charged one always has its price id
+    items.push({ price: extra.stripePriceId!, quantity });
   }
 
   return items;

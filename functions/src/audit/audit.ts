@@ -42,6 +42,14 @@ export const AUDIT_ACTIONS = {
       changes: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })),
     }),
   },
+  "extra.create": {
+    description: "Free extra made in the admin, without a Stripe product",
+    details: z.object({ fields: z.record(z.string(), z.unknown()) }),
+  },
+  "extra.delete": {
+    description: "Extra made in the admin deleted, before any was sold",
+    details: z.object({}),
+  },
   "extra.update": {
     description: "Extra edited; only the fields that changed",
     details: z.object({ changes: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })) }),
