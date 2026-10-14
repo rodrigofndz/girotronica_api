@@ -1,6 +1,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 
 import { qrPng } from "./tickets/qr";
+import { typeNames } from "./tickets/typeNames";
 
 // Watched by sendMail (mailSender.ts); writing a doc here is what sends the mail
 export const MAIL_COLLECTION = "mail";
@@ -72,11 +73,7 @@ export async function queueTicketEmails(tickets: TicketEmail[]): Promise<void> {
   const batch = db.batch();
 
   // Each ticket says which kind it is, by the type's name as it is now (the id if it's gone)
-  const typeIds = [...new Set(tickets.map((t) => t.typeId))];
-  const typeDocs = typeIds.length > 0 ? await db.getAll(...typeIds.map((id) => db.doc(`ticketTypes/${id}`))) : [];
-  const typeNames = new Map(
-    typeDocs.filter((doc) => doc.get("name")).map((doc) => [doc.id, doc.get("name") as string]),
-  );
+  const names = await typeNames(tickets.map((t) => t.typeId));
 
   for (const [holderEmail, group] of byHolder) {
     const attachments = await Promise.all(
@@ -100,7 +97,7 @@ export async function queueTicketEmails(tickets: TicketEmail[]): Promise<void> {
           group.length === 1
             ? "Mostra el codi QR adjunt a l'entrada del recinte."
             : "Mostra els codis QR adjunts a l'entrada del recinte.",
-        html: html(group, typeNames),
+        html: html(group, names),
         attachments,
       },
     } satisfies MailDoc);
