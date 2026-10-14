@@ -2,6 +2,7 @@ import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
+import { typeNames } from "../tickets/typeNames";
 import { ORDER_STATUSES, TICKET_STATUSES, type Order, type Ticket } from "../types";
 
 export const orders = new OpenAPIHono();
@@ -17,6 +18,9 @@ const OrderViewSchema = z.object({
   tickets: z.array(z.object({
     id: z.string(),
     typeId: z.string(),
+    typeName: z.string().nullable().openapi({
+      description: "Its type's name as it is now, even once the type is no longer on sale; null if the type is gone",
+    }),
     status: z.enum(TICKET_STATUSES),
     holderName: z.string(),
     days: z.array(z.string()),
@@ -53,11 +57,14 @@ orders.openapi(
       ? await db.getAll(...order.ticketIds.map((id) => db.doc(`tickets/${id}`)))
       : [];
 
-    const tickets = docs.filter((d) => d.exists).map((d) => {
+    const found = docs.filter((d) => d.exists);
+    const names = await typeNames(found.map((d) => (d.data() as Ticket).typeId));
+    const tickets = found.map((d) => {
       const t = d.data() as Ticket;
       return {
         id: d.id,
         typeId: t.typeId,
+        typeName: names.get(t.typeId) ?? null,
         status: t.status,
         holderName: t.holderName,
         days: t.days,
