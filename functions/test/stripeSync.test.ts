@@ -354,6 +354,23 @@ describe("prices that change on a date", () => {
 });
 
 describe("products it can't use", () => {
+  it("names the metadata.typeId to fix when it isn't a valid id, with a valid one to copy", async () => {
+    catalogue([{ id: "prod_pack", name: "LAN Pack", metadata: { typeId: "entrada-PackLAN" }, default_price: eur("p", 3000) }]);
+
+    const res = await sync();
+
+    expect(res.body.results[0]).toMatchObject({
+      result: "skipped",
+      reason: 'metadata.typeId "entrada-PackLAN" can only use lowercase letters, numbers and hyphens, e.g. "entrada-packlan"',
+    });
+  });
+
+  it("asks for a metadata.typeId when the name makes no id", async () => {
+    catalogue([{ id: "prod_emoji", name: "🎟️", default_price: eur("p", 3000) }]);
+
+    expect((await sync()).body.results[0].reason).toBe('can\'t make a ticket type id from "🎟️"; set metadata.typeId in Stripe');
+  });
+
   it("skips them with the reason, and changes nothing for them", async () => {
     await seedTicketType("taken");
     catalogue([

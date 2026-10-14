@@ -70,6 +70,14 @@ describe("syncing extras from Stripe", () => {
     expect((await getFirestore().collection("ticketTypes").get()).docs.map((d) => d.id)).toEqual(["pack"]);
   });
 
+  it("names the metadata.extraId to fix when it isn't a valid id", async () => {
+    catalogue([extra({ id: "prod_dorm", name: "Dormitori", metadata: { extraId: "Plaça Dormitori" }, default_price: eur("p", 0) })]);
+
+    expect((await sync()).body.results[0].reason).toBe(
+      'metadata.extraId "Plaça Dormitori" can only use lowercase letters, numbers and hyphens, e.g. "placa-dormitori"',
+    );
+  });
+
   it("takes its id from metadata.extraId when set, and accepts free extras", async () => {
     catalogue([extra({ id: "prod_dorm", name: "Plaça dormitori", metadata: { extraId: "dormitori" }, default_price: eur("p", 0) })]);
 
