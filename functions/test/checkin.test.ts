@@ -46,6 +46,14 @@ describe("check-in", () => {
     expect(res.body).toMatchObject({ result: "valid", holderName: "Holder" });
   });
 
+  it("says how the ticket was paid, whether it gets in or not", async () => {
+    const online = await givenTicket({ paymentMethod: "stripe" });
+    const cancelled = await givenTicket({ paymentMethod: "assigned", status: "cancelled" });
+
+    expect((await scan(online.code)).body).toMatchObject({ result: "valid", paymentMethod: "stripe" });
+    expect((await scan(cancelled.code)).body).toMatchObject({ result: "rejected", paymentMethod: "assigned" });
+  });
+
   it("reports a second scan as already used, with who and when", async () => {
     const ticket = await givenTicket();
     // The name comes from the scanner's sign-in account, as Google sign-in provides
