@@ -165,6 +165,19 @@ describe("finding tickets by holder email", () => {
     expect(res.body.every((t: { code: string }) => t.code)).toBe(true);
   });
 
+  it("says how each ticket was paid", async () => {
+    await doorSale([oneItem({ holderEmail: "buyer@example.com" })]);
+    await getFirestore().collection("tickets").add({
+      uid: null, typeId: "general", status: "active", code: "online-1",
+      holderName: "Buyer", holderEmail: "buyer@example.com", paymentMethod: "stripe",
+      soldBy: null, purchasedAt: new Date(), days: ["2026-11-20"], isLanParty: false, checkins: {},
+    });
+
+    const res = await apiFetch("GET", "/tickets/by-email?email=buyer@example.com", { token: staff.token });
+
+    expect(res.body.map((t: { paymentMethod: string }) => t.paymentMethod).sort()).toEqual(["cash", "stripe"]);
+  });
+
   it("returns an empty list rather than an error", async () => {
     const res = await apiFetch("GET", "/tickets/by-email?email=nobody@example.com", { token: staff.token });
 
