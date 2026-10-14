@@ -375,6 +375,23 @@ describe("Stripe's answers about an order", () => {
   });
 });
 
+describe("a free extra made in the admin", () => {
+  it("goes with a paid ticket, kept on the ticket but left out of what Stripe charges", async () => {
+    await apiFetch("POST", "/extras", { token: (await createUser("boss@example.com", "admin")).token, body: {
+      id: "welcome-pack", name: "Welcome Pack", options: ["m"], groups: ["lan"],
+    } });
+
+    const res = await buyOnline([lan({ extras: [{ extraId: "welcome-pack", option: "m" }] })]);
+
+    expect(res.status).toBe(200);
+    expect(lastSession().line_items).toEqual([{ price: "price_lan", quantity: 1 }]);
+    expect((await ticketsOf(res.body.orderId))[0].extras).toEqual([
+      { extraId: "welcome-pack", name: "Welcome Pack", option: "m", price: 0 },
+    ]);
+    expect(await extraSold("welcome-pack")).toBe(1);
+  });
+});
+
 describe("shared places", () => {
   const placesTaken = async () => (await getFirestore().doc("capacityPools/lan").get()).data()!.sold;
 

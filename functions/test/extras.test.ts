@@ -196,3 +196,54 @@ describe("which extras the public catalog lists", () => {
     expect((await apiFetch("GET", "/extras/all", { token: user.token })).status).toBe(403);
   });
 });
+
+describe("free extras made in the admin", () => {
+  const create = (body: Record<string, unknown>, token = admin.token) =>
+    apiFetch("POST", "/extras", { token, body });
+  const remove = (id: string, token = admin.token) => apiFetch("DELETE", `/extras/${id}`, { token });
+
+  it("makes one without Stripe, always free and not offered yet, and logs it", async () => {
+    const res = await create({ id: "welcome-pack", name: "Welcome Pack", options: ["s", "m"], capacity: 232 });
+
+    expect(res.status).toBe(201);
+    expect(await listed()).toEqual([{
+      id: "welcome-pack", name: "Welcome Pack", description: null, price: 0, options: ["s", "m"], consent: null,
+      groups: [], capacity: 232, sold: 0, remaining: 232, stripeProductId: null,
+    }]);
+    expect((await auditEntries("extra.create"))[0]).toMatchObject({ actorUid: admin.uid, targetId: "welcome-pack" });
+  });
+
+  it("refuses a price, a taken id, an id that isn't lowercase, and anyone but an admin", async () => {
+    await create({ id: "welcome-pack", name: "Welcome Pack" });
+
+    expect((await create({ id: "paid", name: "Paid", price: 500 })).status).toBe(400);
+    expect((await create({ id: "welcome-pack", name: "Again" })).status).toBe(409);
+    expect((await create({ id: "Welcome Pack", name: "Welcome Pack" })).status).toBe(400);
+    expect((await create({ id: "other", name: "Other" }, staff.token)).status).toBe(403);
+  });
+
+  it("is left alone by the Stripe sync, which won't take its id", async () => {
+    await create({ id: "welcome-pack", name: "Welcome Pack" });
+    catalogue([extra({ id: "prod_wp", name: "Welcome Pack", default_price: eur("price_wp", 500) })]);
+
+    const res = await sync();
+
+    expect(res.body.results[0]).toMatchObject({ result: "skipped" });
+    expect((await listed())[0]).toMatchObject({ id: "welcome-pack", price: 0, stripeProductId: null });
+  });
+
+  it("deletes one only while none is sold, and never one from Stripe", async () => {
+    await create({ id: "welcome-pack", name: "Welcome Pack" });
+    await create({ id: "dormitori", name: "Dormitori" });
+    await getFirestore().doc("extras/dormitori").update({ sold: 1 });
+    catalogue([extra({ id: "prod_tee", name: "Samarreta", default_price: eur("price_tee", 1500) })]);
+    await sync();
+
+    expect((await remove("dormitori")).body).toBe("dormitori has 1 sold; empty its groups to stop offering it instead");
+    expect((await remove("samarreta")).status).toBe(409);
+    expect((await remove("welcome-pack", staff.token)).status).toBe(403);
+    expect((await remove("welcome-pack")).status).toBe(200);
+    expect((await listed()).map((e: { id: string }) => e.id)).toEqual(["dormitori", "samarreta"]);
+    expect(await auditEntries("extra.delete")).toHaveLength(1);
+  });
+});
