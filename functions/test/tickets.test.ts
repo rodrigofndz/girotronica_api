@@ -2,7 +2,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
-  apiFetch, createUser, fetchQr, mailDocs, resetEmulators, seedTicketType, soldCount, startApi,
+  apiFetch, auditEntries, createUser, fetchQr, mailDocs, resetEmulators, seedTicketType, soldCount, startApi,
   stopApi, ticketStatus, type TestUser,
 } from "./helpers";
 
@@ -234,11 +234,13 @@ describe("cancelling", () => {
     expect(await soldCount("general")).toBe(0);
   });
 
-  it("is closed to staff", async () => {
+  it("is open to staff, logged as theirs, but closed to attendees", async () => {
     const sale = await doorSale([oneItem()]);
+    const id = sale.body[0].id;
 
-    expect((await apiFetch("POST", `/tickets/${sale.body[0].id}/cancel`, { token: staff.token })).status)
-      .toBe(403);
+    expect((await apiFetch("POST", `/tickets/${id}/cancel`, { token: attendee.token })).status).toBe(403);
+    expect((await apiFetch("POST", `/tickets/${id}/cancel`, { token: staff.token })).body.changed).toBe(true);
+    expect((await auditEntries("ticket.cancel"))[0]).toMatchObject({ actorUid: staff.uid, targetId: id });
   });
 
   it("reports an unknown ticket", async () => {

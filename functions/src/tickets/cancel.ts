@@ -3,7 +3,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
 import { audit, auditedAs } from "../audit/audit";
-import { requireAdmin, type Env } from "../auth";
+import { requireStaff, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
 import type { Ticket, TicketWrite } from "../types";
 import { releaseExtras } from "../extras/stock";
@@ -47,11 +47,11 @@ ticketCancel.openapi(
     tags: ["Tickets"],
     summary: "Cancel a ticket",
     description:
-      "Admin only. Voids the ticket and frees its capacity. Does not refund: issue the refund " +
+      "Staff or admin. Voids the ticket and frees its capacity. Does not refund: issue the refund " +
       "in Stripe, which cancels the tickets through the webhook. Repeating this is harmless.",
     security: bearerAuth,
     ...auditedAs("ticket.cancel"),
-    middleware: [requireAdmin] as const,
+    middleware: [requireStaff] as const,
     request: {
       params: z.object({ id: z.string().min(1).openapi({ param: { name: "id", in: "path" } }) }),
     },
@@ -64,7 +64,7 @@ ticketCancel.openapi(
           },
         },
       },
-      403: { description: "Caller is not admin" },
+      403: { description: "Caller is not staff or admin" },
       404: { description: "No such ticket" },
     },
   }),

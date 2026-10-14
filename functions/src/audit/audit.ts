@@ -73,7 +73,7 @@ export const AUDIT_ACTIONS = {
     details: z.object({ day: z.string(), reasons: z.array(z.enum(SCAN_REJECTIONS)), code: z.string().optional() }),
   },
   "ticket.cancel": {
-    description: "Cancelled by an admin",
+    description: "Cancelled by staff or an admin",
     details: z.object({ previousStatus: z.enum(TICKET_STATUSES) }),
   },
   "ticket.cancelOnSuspend": {
