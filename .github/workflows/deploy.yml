@@ -39,7 +39,8 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 'lts/*'
+          check-latest: true
           cache: npm
           cache-dependency-path: functions/package-lock.json
 
