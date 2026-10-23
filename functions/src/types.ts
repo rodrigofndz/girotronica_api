@@ -205,7 +205,14 @@ export type Order = {
   buyer: { name: string; email: string; newsletter: boolean };
   uid: string | null;           // the buyer's account, when they bought signed in
   ticketIds: string[];
-  total: number;                // cents
+  // Cents. Orders from before promotion codes have only the total, with nothing off
+  subtotal?: number;            // before the discount
+  discount?: number;
+  total: number;                // what the buyer is asked to pay
+  promotionCode?: { id: string; code: string } | null;
+  // What Stripe charged, set when it confirms payment; it decides the discount, so it can
+  // differ from the total by a rounding cent
+  amountPaid?: number | null;
   stripeSessionId: string | null;
   paymentIntentId: string | null;
   createdAt: FirebaseFirestore.Timestamp;

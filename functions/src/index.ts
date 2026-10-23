@@ -22,7 +22,9 @@ import { capacityPools } from "./tickets/pools";
 import { adminTicketTypes, ticketTypes } from "./tickets/ticketTypes";
 import { tickets } from "./tickets/tickets";
 import { orders } from "./orders/routes";
+import { promotionCodes } from "./orders/promotionCodes";
 import { purchase } from "./orders/purchase";
+import { quote } from "./orders/quote";
 import { ticketAssignment } from "./users/assign";
 import { lanParty } from "./users/lanParty";
 import { userList } from "./users/list";
@@ -74,6 +76,7 @@ app.openapi(
 if (ONLINE_SALES) {
   app.route("/stripe/webhook", stripeWebhook);
   // Open to guests, so mounted before requireAuth; signs the buyer in only if they send a token
+  app.route("/tickets/quote", quote);
   app.route("/tickets", purchase);
   app.route("/orders", orders);
 }
@@ -86,6 +89,7 @@ app.route("/ticket-types", adminTicketTypes);
 app.route("/ticket-types", ticketTypeSync);
 app.route("/extras", adminExtras);
 app.route("/capacity-pools", capacityPools);
+if (ONLINE_SALES) app.route("/promotion-codes", promotionCodes);
 
 app.route("/me", me);
 

@@ -102,12 +102,14 @@ export const AUDIT_ACTIONS = {
   },
   "ticket.purchase": {
     description: "Bought online; waiting for payment, or active at once when the order is free",
-    // `price` is the type's (per ticket, or per whole pack); orderId and extras since guest orders
+    // `price` is the type's (per ticket, or per whole pack), before any promotion code, whose
+    // discount is on the order; orderId and extras since guest orders
     details: z.object({
       typeId: z.string(),
       price: z.int(),
       orderId: z.string().optional(),
       extras: z.array(z.string()).optional(),
+      promotionCode: z.string().optional(),
     }),
   },
   "ticket.checkoutFailed": {

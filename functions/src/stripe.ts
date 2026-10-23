@@ -92,8 +92,13 @@ stripeWebhook.post("/", async (c) => {
         const justActivated: Ticket[] = [];
 
         if (order?.exists && (order.data() as Order).status !== "paid") {
+          const { total } = order.data() as Order;
+          const amountPaid = session.amount_total ?? null;
+          if (amountPaid !== null && amountPaid !== total) {
+            console.warn(`order ${order.id} was quoted ${total} but Stripe charged ${amountPaid}`);
+          }
           tx.update(order.ref, {
-            status: "paid", paymentIntentId, paidAt: FieldValue.serverTimestamp(),
+            status: "paid", paymentIntentId, paidAt: FieldValue.serverTimestamp(), amountPaid,
           } satisfies Partial<OrderWrite>);
         }
 

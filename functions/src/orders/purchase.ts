@@ -15,8 +15,9 @@ import { EmailSchema } from "../schemas";
 import { stripeSecretKey } from "../stripe";
 import { packIds, releaseCapacity, releasePlaces, reserveCapacity } from "../tickets/capacity";
 import {
-  type Extra, type OrderWrite, type Ticket, type TicketExtra, type TicketType, type TicketWrite, typeSettings,
+  type OrderWrite, type Ticket, type TicketExtra, type TicketType, type TicketWrite, typeSettings,
 } from "../types";
+import { applyCode, lookUpCode, type PriceLine, priceLines, PromotionCodeSchema } from "./discounts";
 
 export const purchase = new OpenAPIHono<GuestEnv>();
 
@@ -45,8 +46,8 @@ const PurchaseSchema = z.object({
   attendees: z.array(AttendeeSchema).min(1).max(20).openapi({
     description: "One per person; a pack type needs a whole number of packs of people",
   }),
+  promotionCode: PromotionCodeSchema.optional(),
 });
-type Attendee = z.infer<typeof AttendeeSchema>;
 
 /** LAN and Fighting tickets (and their packs) are the ones whose type offers the LAN extras. */
 const isLanGroup = (type: TicketType) => typeSettings(type).extrasFrom === "lan";
@@ -95,12 +96,15 @@ purchase.openapi(
       400: { description: "Invalid body, unknown type or extra, a partial pack, a missing phone, or only free tickets" },
       401: { description: "A token was sent but isn't valid" },
       403: { description: "Online sales are open to staff only for now (testing), or the account is suspended" },
-      409: { description: "A ticket type or extra is sold out, or not on sale" },
-      502: { description: "Stripe checkout could not be started; nothing was reserved" },
+      409: {
+        description: "A ticket type or extra is sold out or not on sale, or the promotion code can't be used " +
+          "(e.g. it was used up since the quote); quote again to show why",
+      },
+      502: { description: "Stripe checkout could not be started, or the promotion code could not be checked; nothing was reserved" },
     },
   }),
   async (c) => {
-    const { buyer, attendees } = c.req.valid("json");
+    const { buyer, attendees, promotionCode: code } = c.req.valid("json");
     const user = c.get("user");
 
     // While a deployed setup is tested with Stripe's test key, a fake card must not get the
@@ -120,8 +124,12 @@ purchase.openapi(
     const returnTo = origin && isAllowed(origin) ? origin : frontendUrl.value().replace(/\/+$/, "");
     const successUrl = `${returnTo}/tickets/success?order=${orderRef.id}`;
 
+    const stripe = new Stripe(stripeSecretKey());
+    const promo = code ? await lookUpCode(stripe, code) : null;
+    if (code && !promo) throw new HTTPException(409, { message: `${code} doesn't exist` });
+
     // One transaction so the stock checks and the tickets that take the stock can't interleave
-    const { types, extras, tickets } = await db.runTransaction(async (tx) => {
+    const { types, tickets, lines } = await db.runTransaction(async (tx) => {
       const extras = await loadExtras(tx, attendees.flatMap((a) => a.extras.map((e) => e.extraId)));
       const types = await reserveCapacity(tx, attendees);
       const packs = packIds(attendees, types);
@@ -140,9 +148,12 @@ purchase.openapi(
       }
       reserveExtras(tx, extras, attendees.map((a) => ({ type: types.get(a.typeId)!, picks: a.extras })));
 
-      // Prices are per person, packs included
-      const total = attendees.reduce((sum, a) => sum + types.get(a.typeId)!.price, 0)
-        + attendees.reduce((sum, a) => sum + a.extras.reduce((s, e) => s + extras.get(e.extraId)!.price, 0), 0);
+      const lines = priceLines(attendees, types, extras);
+      const subtotal = lines.reduce((sum, l) => sum + l.amount, 0);
+      // Checked again here, as it may have expired or run out since the buyer's quote
+      const applied = promo && applyCode(promo, lines);
+      if (applied && !applied.ok) throw new HTTPException(409, { message: applied.problem.message });
+      const discount = applied ? applied.discount : 0;
 
       const tickets = attendees.map((a, i): TicketWrite => {
         const type = types.get(a.typeId)!;
@@ -188,6 +199,7 @@ purchase.openapi(
             price: types.get(ticket.typeId)!.price,
             orderId: orderRef.id,
             extras: ticket.extras!.map((e) => e.extraId),
+            ...(promo && { promotionCode: promo.code }),
           },
         });
       });
@@ -197,21 +209,27 @@ purchase.openapi(
         buyer,
         uid: user?.uid ?? null,
         ticketIds: ticketRefs.map((ref) => ref.id),
-        total,
+        subtotal,
+        discount,
+        total: subtotal - discount,
+        promotionCode: promo && { id: promo.id, code: promo.code },
+        amountPaid: null,
         stripeSessionId: null,
         paymentIntentId: null,
         createdAt: FieldValue.serverTimestamp(),
         paidAt: null,
       } satisfies OrderWrite);
 
-      return { types, extras, tickets };
+      return { types, tickets, lines };
     });
 
     let session: Stripe.Checkout.Session;
     try {
-      session = await new Stripe(stripeSecretKey()).checkout.sessions.create({
+      session = await stripe.checkout.sessions.create({
         mode: "payment",
-        line_items: lineItems(attendees, types, extras),
+        line_items: lineItems(lines),
+        // Stripe works out the discount itself, and shows it on its page and the receipt
+        ...(promo && { discounts: [{ promotion_code: promo.id }] }),
         customer_email: buyer.email,
         locale: "auto",
         expires_at: Math.floor(Date.now() / 1000) + CHECKOUT_LIFETIME_SECONDS,
@@ -246,33 +264,12 @@ purchase.openapi(
   },
 );
 
-/**
- * What Stripe charges: one line per ticket type, one per person since prices are per person
- * (packs included), and one per extra. Free lines are left out; the order keeps them.
- */
-function lineItems(
-  attendees: Attendee[],
-  types: Map<string, TicketType>,
-  extras: Map<string, Extra>,
-): Stripe.Checkout.SessionCreateParams.LineItem[] {
-  const items: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
-
-  for (const type of types.values()) {
-    if (type.price === 0) continue;
-    const quantity = attendees.filter((a) => a.typeId === type.id).length;
-    // A type synced from Stripe is charged at Stripe's own price, so its catalogue,
-    // reports and receipts show the real product
-    items.push(type.stripePriceId
-      ? { price: type.stripePriceId, quantity }
-      : { price_data: { currency: "eur", unit_amount: type.price, product_data: { name: type.name } }, quantity });
-  }
-
-  for (const extra of extras.values()) {
-    if (extra.price === 0) continue;
-    const quantity = attendees.flatMap((a) => a.extras).filter((e) => e.extraId === extra.id).length;
-    // Only Stripe's extras can have a price, so a charged one always has its price id
-    items.push({ price: extra.stripePriceId!, quantity });
-  }
-
-  return items;
+/** What Stripe charges: the order's lines, leaving out the free ones (the order keeps them). */
+function lineItems(lines: PriceLine[]): Stripe.Checkout.SessionCreateParams.LineItem[] {
+  return lines.filter((l) => l.amount > 0).map((l) =>
+    // A line with a Stripe price is charged at it, so Stripe's catalogue, reports and receipts
+    // show the real product; only Stripe's extras can have a price, so those always have one
+    l.stripePriceId
+      ? { price: l.stripePriceId, quantity: l.quantity }
+      : { price_data: { currency: "eur", unit_amount: l.unitPrice, product_data: { name: l.name } }, quantity: l.quantity });
 }

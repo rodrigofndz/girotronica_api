@@ -14,7 +14,10 @@ const OrderViewSchema = z.object({
   status: z.enum(ORDER_STATUSES).openapi({
     description: "pending until Stripe confirms payment; paid; expired if the checkout lapsed unpaid",
   }),
-  total: z.int().nonnegative().openapi({ description: "Cents" }),
+  subtotal: z.int().nonnegative().openapi({ description: "Cents, before the discount" }),
+  discount: z.int().nonnegative().openapi({ description: "Cents taken off by the promotion code" }),
+  total: z.int().nonnegative().openapi({ description: "Cents: what the buyer was asked to pay" }),
+  promotionCode: z.string().nullable(),
   tickets: z.array(z.object({
     id: z.string(),
     typeId: z.string(),
@@ -72,6 +75,14 @@ orders.openapi(
       };
     });
 
-    return c.json({ id: snap.id, status: order.status, total: order.total, tickets }, 200);
+    return c.json({
+      id: snap.id,
+      status: order.status,
+      subtotal: order.subtotal ?? order.total,
+      discount: order.discount ?? 0,
+      total: order.total,
+      promotionCode: order.promotionCode?.code ?? null,
+      tickets,
+    }, 200);
   },
 );
