@@ -428,14 +428,17 @@ describe("the confirmation page's view of an order", () => {
 
     expect(view.status).toBe(200);
     expect(view.body).toEqual({
-      id: res.body.orderId, status: "pending", total: 3500 + 900 + 1500,
+      id: res.body.orderId, status: "pending",
+      subtotal: 3500 + 900 + 1500, discount: 0, total: 3500 + 900 + 1500, promotionCode: null,
       tickets: expect.arrayContaining([
         { id: expect.any(String), typeId: "general", typeName: "general", status: "pending", holderName: "Anna Puig", days: ["2026-11-20"],
           extras: [{ extraId: "samarreta", name: "samarreta", option: "M" }] },
       ]),
     });
     const text = JSON.stringify(view.body);
-    for (const secret of ["600000001", "anna@example.com", "1990-05-10", "code", "buyer@example.com"]) {
+    const codes = (await ticketsOf(res.body.orderId)).map((t) => t.code);
+    expect(text).not.toMatch(/"code"/);
+    for (const secret of ["600000001", "anna@example.com", "1990-05-10", ...codes, "buyer@example.com"]) {
       expect(text).not.toContain(secret);
     }
   });
