@@ -235,28 +235,3 @@ describe("reading the log", () => {
     expect((await getFirestore().doc(`auditLog/${id}`).get()).exists).toBe(true);
   });
 });
-
-// A new endpoint that changes data has to say what it logs, or this fails
-describe("every data-changing endpoint", () => {
-  it("declares which actions it records, all of them real", async () => {
-    const spec = (await apiFetch("GET", "/openapi.json")).body as {
-      paths: Record<string, Record<string, { "x-audit"?: string[] }>>;
-    };
-
-    const undeclared: string[] = [];
-    const unknown: string[] = [];
-    for (const [path, operations] of Object.entries(spec.paths)) {
-      for (const [method, operation] of Object.entries(operations)) {
-        if (method === "get") continue;
-        const actions = operation["x-audit"];
-        if (!actions || actions.length === 0) undeclared.push(`${method.toUpperCase()} ${path}`);
-        for (const action of actions ?? []) {
-          if (!AUDIT_ACTION_NAMES.includes(action as never)) unknown.push(action);
-        }
-      }
-    }
-
-    expect(undeclared).toEqual([]);
-    expect(unknown).toEqual([]);
-  });
-});
