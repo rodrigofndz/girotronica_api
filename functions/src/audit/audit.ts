@@ -224,3 +224,6 @@ export function audit<A extends AuditAction>(
  * when a route that changes data declares nothing.
  */
 export const auditedAs = (...actions: AuditAction[]) => ({ "x-audit": actions });
+
+/** Declares that a route which isn't a GET (e.g. a price quote, sent as a POST) logs nothing because it changes nothing. */
+export const changesNothing = { "x-audit": [] as AuditAction[] };

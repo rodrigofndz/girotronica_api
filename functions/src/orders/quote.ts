@@ -3,6 +3,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
 
+import { changesNothing } from "../audit/audit";
 import { stripeSecretKey } from "../stripe";
 import { isOnSale } from "../tickets/capacity";
 import { type Extra, priceAt, type TicketType } from "../types";
@@ -56,6 +57,7 @@ quote.openapi(
       "can be used, so the buyer sees the final price before paying. Reserves nothing and doesn't " +
       "check stock; buying checks the code again. Stripe charges the real amount, which with a " +
       "percentage on some products only may differ by a rounding cent.",
+    ...changesNothing,
     request: {
       body: { required: true, content: { "application/json": { schema: QuoteSchema } } },
     },
