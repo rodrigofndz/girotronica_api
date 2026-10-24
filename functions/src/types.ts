@@ -57,6 +57,11 @@ export type UserProfile = {
   suspended?: boolean;
   suspendedAt?: FirebaseFirestore.Timestamp | null;
   suspendedBy?: string | null;
+  // Optional, set by the user in their profile (YYYY-MM-DD); absent or null when not given
+  birthDate?: string | null;
+  // When the user last set their name through the API; a sign-in token issued before it still
+  // carries the old name, so it mustn't be followed. Absent until they do
+  nameSetAt?: FirebaseFirestore.Timestamp;
 };
 
 /** Where the event happens; its days and dates without a time are read in this zone. */

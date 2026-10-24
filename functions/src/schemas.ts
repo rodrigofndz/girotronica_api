@@ -16,6 +16,10 @@ export const EmailSchema = z
   .pipe(z.email())
   .openapi({ format: "email", description: "Case-insensitive; stored lowercase" });
 
+/** A date of birth: an ISO date, not in the future. */
+export const BirthDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be an ISO date (YYYY-MM-DD)")
+  .refine((d) => !Number.isNaN(Date.parse(d)) && d <= new Date().toISOString().slice(0, 10), "must be a past date");
+
 export const UserProfileSchema = z.object({
   uid: z.string(),
   email: z.string().nullable(),

@@ -86,8 +86,9 @@ async function authenticate(header: string): Promise<User> {
       // A profile from before authName: start tracking, and only fill an empty name
       updates.authName = authName;
       if (!profile.displayName && authName) updates.displayName = displayName = authName;
-    } else if (authName && authName !== profile.authName) {
-      // The name changed at the sign-in provider (e.g. in Google), so follow it
+    } else if (authName && authName !== profile.authName && !issuedBefore(decoded.iat, profile.nameSetAt)) {
+      // The name changed at the sign-in provider (e.g. in Google), so follow it. Not from a
+      // token older than a name set through the API, which still carries the name it replaced
       updates.authName = authName;
       updates.displayName = displayName = authName;
     }
@@ -104,6 +105,9 @@ async function authenticate(header: string): Promise<User> {
     role: profile?.role ?? "user",
   };
 }
+
+const issuedBefore = (iatSeconds: number, at: FirebaseFirestore.Timestamp | undefined) =>
+  at !== undefined && iatSeconds * 1000 < at.toMillis();
 
 const requireRole = (...roles: Role[]) =>
   createMiddleware<Env>(async (c, next) => {

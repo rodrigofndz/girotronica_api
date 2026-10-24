@@ -153,6 +153,10 @@ export const AUDIT_ACTIONS = {
     description: "Account reactivated",
     details: z.object({}),
   },
+  "user.profileUpdate": {
+    description: "Users edited their own profile; which fields, not their values, which are personal",
+    details: z.object({ fields: z.array(z.string()) }),
+  },
 } satisfies Record<`${AuditTarget}.${string}`, { description: string; details: z.ZodType }>;
 
 export type AuditAction = keyof typeof AUDIT_ACTIONS;

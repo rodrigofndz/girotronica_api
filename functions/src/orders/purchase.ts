@@ -11,7 +11,7 @@ import { frontendUrl } from "../config";
 import { isAllowed } from "../cors";
 import { loadExtras, releaseExtras, reserveExtras } from "../extras/stock";
 import { ONLINE_SALES_MODE } from "../features";
-import { EmailSchema } from "../schemas";
+import { BirthDateSchema, EmailSchema } from "../schemas";
 import { stripeSecretKey } from "../stripe";
 import { packIds, releaseCapacity, releasePlaces, reserveCapacity } from "../tickets/capacity";
 import {
@@ -24,14 +24,11 @@ export const purchase = new OpenAPIHono<GuestEnv>();
 /** Stripe's shortest allowed checkout lifetime is 30 minutes; a little over avoids clock skew. */
 const CHECKOUT_LIFETIME_SECONDS = 31 * 60;
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be an ISO date (YYYY-MM-DD)")
-  .refine((d) => !Number.isNaN(Date.parse(d)) && d <= new Date().toISOString().slice(0, 10), "must be a past date");
-
 const AttendeeSchema = z.object({
   typeId: z.string().min(1),
   name: z.string().trim().min(1).max(200).openapi({ description: "Full name (nom i cognoms)" }),
   email: EmailSchema,
-  birthDate: isoDate,
+  birthDate: BirthDateSchema,
   phone: z.string().trim().min(6).max(20).optional().openapi({ description: "Required for LAN-group tickets" }),
   discord: z.string().trim().max(50).optional(),
   extras: z.array(z.object({ extraId: z.string().min(1), option: z.string().optional() })).max(10).default([]),
