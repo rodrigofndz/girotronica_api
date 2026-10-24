@@ -242,7 +242,7 @@ describe("the admin's list of codes", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual([
       {
-        id: "promo_LAN10", code: "LAN10", usable: true, problem: null,
+        id: "promo_LAN10", code: "LAN10", state: "active", usable: true, problem: null,
         percentOff: 10, amountOff: null, minimumAmount: null,
         appliesTo: [
           { kind: "ticketType", id: "lan", name: "lan" },
@@ -252,8 +252,33 @@ describe("the admin's list of codes", () => {
         expiresAt: new Date(1_800_000_000_000).toISOString(), maxRedemptions: 50, timesRedeemed: 3,
         createdAt: new Date(1_790_000_000_000).toISOString(),
       },
-      expect.objectContaining({ code: "OLD", usable: false, problem: "expired", amountOff: 500, appliesTo: null }),
+      expect.objectContaining({ code: "OLD", state: "active", usable: false, problem: "expired", amountOff: 500, appliesTo: null }),
     ]);
+  });
+
+  it("lists the active codes by default, the switched-off ones on request, and never deleted ones", async () => {
+    const deleted = promo("GONE", {});
+    deleted.promotion.coupon = { id: "coupon_GONE", object: "coupon", deleted: true } as never;
+    const notExpanded = promo("BARE", {});
+    notExpanded.promotion.coupon = "coupon_BARE" as never;
+    givenCodes(promo("ON", { percent_off: 10 }), promo("OFF", { percent_off: 10 }, { active: false }), deleted, notExpanded);
+    const list = async (query = "") =>
+      (await apiFetch("GET", `/promotion-codes${query}`, { token: admin.token })).body
+        .map((p: { code: string; state: string; usable: boolean; percentOff: number | null }) => [p.code, p.state, p.usable, p.percentOff]);
+
+    expect(await list()).toEqual([["ON", "active", true, 10]]);
+    expect(await list("?state=active")).toEqual([["ON", "active", true, 10]]);
+    expect(await list("?state=inactive")).toEqual([["OFF", "inactive", false, 10]]);
+    expect((await apiFetch("GET", "/promotion-codes?state=deleted", { token: admin.token })).status).toBe(400);
+  });
+
+  it("refuses a code whose coupon was deleted when buying", async () => {
+    const deleted = promo("GONE", {});
+    deleted.promotion.coupon = { id: "coupon_GONE", object: "coupon", deleted: true } as never;
+    givenCodes(deleted);
+
+    expect((await quote([attendee()], "GONE")).body.promotionCode).toMatchObject({ applied: false, problem: { reason: "not_found" } });
+    expect((await buy([attendee()], "GONE")).status).toBe(409);
   });
 
   it("is for admins only", async () => {
