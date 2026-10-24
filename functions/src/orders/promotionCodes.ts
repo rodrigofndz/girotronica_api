@@ -6,13 +6,19 @@ import Stripe from "stripe";
 import { requireAdmin, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
 import { stripeSecretKey } from "../stripe";
-import { CODE_PROBLEMS, codeProblem, codeTerms } from "./discounts";
+import { CODE_PROBLEMS, codeProblem, codeState, codeTerms } from "./discounts";
 
 export const promotionCodes = new OpenAPIHono<Env>();
+
+// A code whose coupon was deleted is never listed: it can't come back, so it's only clutter
+const LISTED_STATES = ["active", "inactive"] as const;
 
 const PromotionCodeViewSchema = z.object({
   id: z.string().openapi({ description: "Stripe's promotion code id" }),
   code: z.string(),
+  state: z.enum(LISTED_STATES).openapi({
+    description: "active: switched on in Stripe (it may still have expired or run out, see usable); inactive: switched off",
+  }),
   usable: z.boolean().openapi({ description: "Whether a buyer can use it now, in an order it applies to" }),
   problem: z.enum(CODE_PROBLEMS).nullable().openapi({ description: "Why it can't be used, when not usable" }),
   percentOff: z.number().nullable(),
@@ -51,19 +57,27 @@ promotionCodes.openapi(
     description:
       "Admin only. The promotion codes in Stripe, newest first, and whether each can be used. " +
       "They're made, changed and switched off in the Stripe dashboard (a coupon with a promotion " +
-      "code). Codes tied to a customer or a first purchase can't be used online.",
+      "code). Codes tied to a customer or a first purchase can't be used online. Codes whose " +
+      "coupon was deleted are left out.",
     security: bearerAuth,
     middleware: [requireAdmin] as const,
+    request: {
+      query: z.object({
+        state: z.enum(LISTED_STATES).default("active").openapi({ description: "Which codes to list; the active ones by default" }),
+      }),
+    },
     responses: {
       200: {
         description: "Promotion codes",
         content: { "application/json": { schema: z.array(PromotionCodeViewSchema) } },
       },
+      400: { description: "Unknown state" },
       403: { description: "Caller is not admin" },
       502: { description: "Stripe could not be reached" },
     },
   }),
   async (c) => {
+    const { state } = c.req.valid("query");
     const db = getFirestore();
     const [codes, types, extras] = await Promise.all([
       listCodes(),
@@ -79,12 +93,14 @@ promotionCodes.openapi(
       }
     }
 
-    return c.json(codes.map((promo) => {
+    const wanted = codes.filter((promo) => codeState(promo) === state);
+    return c.json(wanted.map((promo) => {
       const problem = codeProblem(promo);
       const { percentOff, amountOff, minimumAmount, products } = codeTerms(promo);
       return {
         id: promo.id,
         code: promo.code,
+        state,
         usable: problem === null,
         problem: problem?.reason ?? null,
         percentOff,

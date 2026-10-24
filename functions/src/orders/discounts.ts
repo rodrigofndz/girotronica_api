@@ -68,9 +68,24 @@ export function priceLines(
   return lines;
 }
 
-/** The coupon behind a code, when it was looked up with it expanded. */
-export const couponOf = (promo: Stripe.PromotionCode): Stripe.Coupon | null =>
-  typeof promo.promotion.coupon === "object" ? promo.promotion.coupon : null;
+/**
+ * Where a code stands in Stripe: switched on, switched off (archived), or its coupon deleted,
+ * which Stripe still lists the code for but which can never come back. Expiry and uses are
+ * apart from this: an active code may still have expired or run out (see codeProblem).
+ */
+export const CODE_STATES = ["active", "inactive", "deleted"] as const;
+export type CodeState = (typeof CODE_STATES)[number];
+
+/** The coupon behind a code, when it was looked up with it expanded and still exists. */
+export function couponOf(promo: Stripe.PromotionCode): Stripe.Coupon | null {
+  const coupon = promo.promotion.coupon as Stripe.Coupon | Stripe.DeletedCoupon | string | null;
+  return coupon && typeof coupon === "object" && !coupon.deleted ? coupon : null;
+}
+
+export function codeState(promo: Stripe.PromotionCode): CodeState {
+  if (!couponOf(promo)) return "deleted";
+  return promo.active ? "active" : "inactive";
+}
 
 /** The code's minimum order in euros, or undefined when it has one only in other currencies. */
 function minimumInEuros(promo: Stripe.PromotionCode): number | null | undefined {
