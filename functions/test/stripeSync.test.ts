@@ -74,7 +74,7 @@ describe("a new Stripe product", () => {
       name: "Pack de tres dies", price: 1300, capacity: 0, isLanParty: false, days: [], sold: 0,
       stripeProductId: "prod_pack", stripePriceId: "price_pack", priceChanges: [],
       category: "general", packSize: 1, entries: "once", extrasFrom: "general",
-      description: null, features: [], disclaimer: null,
+      description: null, features: [], disclaimer: null, allowsCompanion: false, isCompanion: false,
     });
     const [listed] = (await apiFetch("GET", "/ticket-types/all", { token: admin.token })).body;
     expect(listed).toMatchObject({ onSale: false, stripeProductId: "prod_pack" });

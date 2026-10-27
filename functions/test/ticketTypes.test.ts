@@ -155,6 +155,62 @@ describe("updating a type", () => {
   });
 });
 
+describe("companion settings", () => {
+  const patch = (id: string, body: Record<string, unknown>) =>
+    apiFetch("PATCH", `/ticket-types/${id}`, { token: admin.token, body });
+
+  it("are off on a type that never set them", async () => {
+    await seedTicketType("general");
+
+    expect((await apiFetch("GET", "/ticket-types")).body[0]).toMatchObject({ allowsCompanion: false, isCompanion: false });
+  });
+
+  it("can mark a type that takes companions and the companion type, and logs it", async () => {
+    await seedTicketType("lan");
+    await seedTicketType("companion", { price: 500 });
+
+    expect((await patch("lan", { allowsCompanion: true })).body).toMatchObject({ allowsCompanion: true, isCompanion: false });
+    expect((await patch("companion", { isCompanion: true })).body).toMatchObject({ allowsCompanion: false, isCompanion: true });
+    expect((await auditEntries("ticketType.update"))[0].details).toEqual({
+      changes: { allowsCompanion: { from: null, to: true } },
+    });
+  });
+
+  it("refuses a companion type that takes companions or is a pack", async () => {
+    await seedTicketType("companion", { isCompanion: true });
+    await seedTicketType("pack", { packSize: 4 });
+
+    expect((await patch("companion", { allowsCompanion: true })).status).toBe(400);
+    expect((await patch("companion", { packSize: 2 })).status).toBe(400);
+    expect((await patch("pack", { isCompanion: true })).status).toBe(400);
+    expect((await apiFetch("POST", "/ticket-types", {
+      token: admin.token, body: { id: "both", name: "Both", isCompanion: true, allowsCompanion: true },
+    })).status).toBe(400);
+  });
+
+  // Its tickets were sold linked to a host, or not
+  it("won't make a type a companion one, or stop it being one, once it has sales", async () => {
+    await seedTicketType("general", { sold: 1 });
+    await seedTicketType("companion", { isCompanion: true, sold: 1 });
+
+    expect((await patch("general", { isCompanion: true })).status).toBe(409);
+    expect((await patch("companion", { isCompanion: false })).status).toBe(409);
+    expect((await patch("companion", { isCompanion: true })).status).toBe(200);
+  });
+
+  it("can turn allowsCompanion off after sales", async () => {
+    await seedTicketType("lan", { allowsCompanion: true, sold: 3 });
+
+    expect((await patch("lan", { allowsCompanion: false })).body.allowsCompanion).toBe(false);
+  });
+
+  it("start off on a free type made in the admin", async () => {
+    const res = await apiFetch("POST", "/ticket-types", { token: admin.token, body: { id: "kids", name: "Kids" } });
+
+    expect(res.body).toMatchObject({ allowsCompanion: false, isCompanion: false });
+  });
+});
+
 describe("deleting a type", () => {
   // Cancelling or refunding its tickets needs the type
   it("refuses a type with tickets sold, saying how to stop sales instead", async () => {
