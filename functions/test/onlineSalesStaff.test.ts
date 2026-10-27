@@ -5,7 +5,7 @@ import {
 } from "./helpers";
 
 // How production runs while the deployed setup is tested with Stripe's test key
-vi.mock("../src/features", () => ({ ONLINE_SALES: true, ONLINE_SALES_MODE: "staff" }));
+vi.mock("../src/features", () => ({ ONLINE_SALES: true, ONLINE_SALES_MODE: "staff", COMPANIONS_ADMIN_ONLY: false }));
 
 const createSession = vi.hoisted(() => vi.fn());
 

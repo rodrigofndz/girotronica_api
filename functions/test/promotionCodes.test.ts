@@ -5,7 +5,7 @@ import {
   seedTicketType, sendStripeEvent, soldCount, startApi, stopApi, type TestUser,
 } from "./helpers";
 
-vi.mock("../src/features", () => ({ ONLINE_SALES: true, ONLINE_SALES_MODE: "public" }));
+vi.mock("../src/features", () => ({ ONLINE_SALES: true, ONLINE_SALES_MODE: "public", COMPANIONS_ADMIN_ONLY: false }));
 
 // Only checkout and the promotion codes are faked; the real Stripe class (and its webhook signing) stays
 const createSession = vi.hoisted(() => vi.fn());
