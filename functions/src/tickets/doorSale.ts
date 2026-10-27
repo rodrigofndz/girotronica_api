@@ -9,7 +9,7 @@ import { queueTicketEmails } from "../mail";
 import { bearerAuth, EmailSchema } from "../schemas";
 import { PAYMENT_METHODS, type TicketWrite, typeSettings } from "../types";
 import { packIds, reserveCapacity } from "./capacity";
-import { companionLinks, loadHostTickets, pairCompanions, WithSchema } from "./companions";
+import { companionLinks, loadHostTickets, pairCompanions, refuseHiddenCompanions, WithSchema } from "./companions";
 
 export const doorSale = new OpenAPIHono<Env>();
 
@@ -77,6 +77,7 @@ doorSale.openapi(doorSaleRoute, async (c) => {
   const types = await db.runTransaction(async (tx) => {
     const hosts = await loadHostTickets(tx, items, "anyone");
     const reserved = await reserveCapacity(tx, items);
+    refuseHiddenCompanions(reserved, seller);
     const packs = packIds(items, reserved);
     const { companionOf, companionId } = companionLinks(
       pairCompanions(items, reserved, hosts),

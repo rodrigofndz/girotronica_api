@@ -15,3 +15,10 @@ export const ONLINE_SALES_MODE: OnlineSalesMode =
   configured && ONLINE_SALES_MODES.includes(configured) ? configured : "off";
 
 export const ONLINE_SALES = ONLINE_SALES_MODE !== "off";
+
+/**
+ * Companion tickets are tried out by admins before anyone else sees them: while this is true,
+ * companion types are left out of the public list, and only an admin can quote, buy or sell
+ * them at the door. Set it to false (a release) to open them to everyone.
+ */
+export const COMPANIONS_ADMIN_ONLY = true;

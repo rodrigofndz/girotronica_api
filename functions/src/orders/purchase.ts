@@ -15,7 +15,7 @@ import { BirthDateSchema, EmailSchema } from "../schemas";
 import { stripeSecretKey } from "../stripe";
 import { packIds, releaseCapacity, releasePlaces, reserveCapacity } from "../tickets/capacity";
 import {
-  companionLinks, type HostTicket, loadHostTickets, pairCompanions, WITH_DESCRIPTION, WithSchema,
+  companionLinks, type HostTicket, loadHostTickets, pairCompanions, refuseHiddenCompanions, WITH_DESCRIPTION, WithSchema,
 } from "../tickets/companions";
 import {
   type OrderWrite, type Ticket, type TicketExtra, type TicketType, type TicketWrite, typeSettings,
@@ -141,6 +141,7 @@ purchase.openapi(
       const extras = await loadExtras(tx, attendees.flatMap((a) => a.extras.map((e) => e.extraId)));
       const hosts = await loadHostTickets(tx, attendees, user ?? null);
       const types = await reserveCapacity(tx, attendees);
+      refuseHiddenCompanions(types, user);
       const packs = packIds(attendees, types);
       const { companionOf, companionId } = companionLinks(
         pairCompanions(attendees, types, hosts),

@@ -4,13 +4,14 @@ import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
 
 import { changesNothing } from "../audit/audit";
+import { type GuestEnv, optionalAuth } from "../auth";
 import { stripeSecretKey } from "../stripe";
 import { isOnSale } from "../tickets/capacity";
-import { pairCompanions, WITH_DESCRIPTION, WithSchema } from "../tickets/companions";
+import { pairCompanions, refuseHiddenCompanions, WITH_DESCRIPTION, WithSchema } from "../tickets/companions";
 import { type Extra, priceAt, type TicketType } from "../types";
 import { applyCode, CODE_PROBLEMS, codeTerms, lookUpCode, priceLines, PromotionCodeSchema } from "./discounts";
 
-export const quote = new OpenAPIHono();
+export const quote = new OpenAPIHono<GuestEnv>();
 
 const QuoteSchema = z.object({
   attendees: z.array(z.object({
@@ -61,6 +62,7 @@ quote.openapi(
       "can be used, so the buyer sees the final price before paying. Reserves nothing and doesn't " +
       "check stock; buying checks the code again. Stripe charges the real amount, which with a " +
       "percentage on some products only may differ by a rounding cent.",
+    middleware: [optionalAuth] as const,
     ...changesNothing,
     request: {
       body: { required: true, content: { "application/json": { schema: QuoteSchema } } },
@@ -98,6 +100,7 @@ quote.openapi(
       extras.set(doc.id, { id: doc.id, ...(doc.data() as Omit<Extra, "id">) });
     }
 
+    refuseHiddenCompanions(types, c.get("user"));
     pairCompanions(attendees, types, null);
 
     const lines = priceLines(attendees, types, extras);
