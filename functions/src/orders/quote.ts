@@ -6,6 +6,7 @@ import Stripe from "stripe";
 import { changesNothing } from "../audit/audit";
 import { stripeSecretKey } from "../stripe";
 import { isOnSale } from "../tickets/capacity";
+import { pairCompanions, WITH_DESCRIPTION, WithSchema } from "../tickets/companions";
 import { type Extra, priceAt, type TicketType } from "../types";
 import { applyCode, CODE_PROBLEMS, codeTerms, lookUpCode, priceLines, PromotionCodeSchema } from "./discounts";
 
@@ -15,6 +16,9 @@ const QuoteSchema = z.object({
   attendees: z.array(z.object({
     typeId: z.string().min(1),
     extras: z.array(z.object({ extraId: z.string().min(1) })).max(10).default([]),
+    with: WithSchema.openapi({
+      description: `${WITH_DESCRIPTION} Here only a position in the list is checked; a ticket already sold is checked when buying.`,
+    }),
   })).min(1).max(20).openapi({ description: "One per person, as for buying; only what's priced" }),
   promotionCode: PromotionCodeSchema.optional(),
 });
@@ -63,7 +67,7 @@ quote.openapi(
     },
     responses: {
       200: { description: "The price", content: { "application/json": { schema: QuoteViewSchema } } },
-      400: { description: "Invalid body, or an unknown type or extra" },
+      400: { description: "Invalid body, an unknown type or extra, or a companion without a valid `with`" },
       409: { description: "A ticket type isn't on sale" },
       502: { description: "The promotion code could not be checked" },
     },
@@ -93,6 +97,8 @@ quote.openapi(
       if (!doc.exists) throw new HTTPException(400, { message: `unknown extra: ${doc.id}` });
       extras.set(doc.id, { id: doc.id, ...(doc.data() as Omit<Extra, "id">) });
     }
+
+    pairCompanions(attendees, types, null);
 
     const lines = priceLines(attendees, types, extras);
     const subtotal = lines.reduce((sum, l) => sum + l.amount, 0);

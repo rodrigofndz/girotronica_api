@@ -9,6 +9,7 @@ import { requireAdmin, type Env } from "../auth";
 import { queueTicketEmails } from "../mail";
 import { bearerAuth } from "../schemas";
 import { takePlaces } from "../tickets/capacity";
+import { loadHostTickets, pairCompanions } from "../tickets/companions";
 import { type TicketType, type TicketWrite, type UserProfile, typeSettings } from "../types";
 
 export const ticketAssignment = new OpenAPIHono<Env>();
@@ -39,20 +40,37 @@ ticketAssignment.openapi(
       params: z.object({ uid: z.string().min(1).openapi({ param: { name: "uid", in: "path" } }) }),
       body: {
         required: true,
-        content: { "application/json": { schema: z.object({ typeId: z.string().min(1) }).strict() } },
+        content: {
+          "application/json": {
+            schema: z.object({
+              typeId: z.string().min(1),
+              with: z.string().min(1).optional().openapi({
+                description: "Only for a companion type, and required there: the id of the active ticket it " +
+                  "goes with, anyone's, whose type allowsCompanion and has no companion yet",
+              }),
+            }).strict(),
+          },
+        },
       },
     },
     responses: {
       200: { description: "The ticket", content: { "application/json": { schema: AssignedTicketSchema } } },
-      400: { description: "A pack type, a type without days yet, or an account without an email" },
+      400: {
+        description: "A pack type, a type without days yet, an account without an email, an unknown ticket, " +
+          "or a companion without `with` (or `with` on another type)",
+      },
       403: { description: "Caller is not admin" },
       404: { description: "No such user or ticket type" },
-      409: { description: "The type is sold out, or the account is suspended" },
+      409: {
+        description: "The type is sold out, the account is suspended, or the ticket a companion goes with " +
+          "can't take one (not active, already has one, or its type doesn't take them)",
+      },
     },
   }),
   async (c) => {
     const { uid } = c.req.valid("param");
-    const { typeId } = c.req.valid("json");
+    const body = c.req.valid("json");
+    const { typeId } = body;
     const admin = c.get("user");
     const db = getFirestore();
     const ticketRef = db.collection("tickets").doc();
@@ -61,6 +79,7 @@ ticketAssignment.openapi(
     const ticket = await db.runTransaction(async (tx) => {
       const typeRef = db.doc(`ticketTypes/${typeId}`);
       const [profileSnap, typeSnap] = await tx.getAll(db.doc(`users/${uid}`), typeRef);
+      const hosts = await loadHostTickets(tx, [body], "anyone");
 
       const profile = profileSnap.data() as UserProfile | undefined;
       if (!profile) throw new HTTPException(404, { message: "user not found" });
@@ -84,6 +103,8 @@ ticketAssignment.openapi(
         });
       }
 
+      const [host] = pairCompanions([body], new Map([[typeId, { id: typeId, ...type }]]), hosts) as (string | null)[];
+
       if (type.poolId) await takePlaces(tx, new Map([[type.poolId, 1]]));
 
       const ticket = {
@@ -102,15 +123,17 @@ ticketAssignment.openapi(
         packId: null,
         poolId: type.poolId ?? null,
         checkins: {},
+        ...(host && { companionOf: host }),
       } satisfies TicketWrite;
 
       tx.update(typeRef, { sold: FieldValue.increment(1) });
       tx.set(ticketRef, ticket);
+      if (host) tx.update(hosts.get(host)!.ref, { companionId: ticketRef.id } satisfies Partial<TicketWrite>);
       audit(tx, {
         actor: admin,
         action: "ticket.assign",
         target: { id: ticketRef.id, label: ticket.holderName },
-        details: { typeId, uid, email: profile.email },
+        details: { typeId, uid, email: profile.email, ...(host && { companionOf: host }) },
       });
       return ticket;
     });

@@ -15,6 +15,9 @@ import { BirthDateSchema, EmailSchema } from "../schemas";
 import { stripeSecretKey } from "../stripe";
 import { packIds, releaseCapacity, releasePlaces, reserveCapacity } from "../tickets/capacity";
 import {
+  companionLinks, type HostTicket, loadHostTickets, pairCompanions, WITH_DESCRIPTION, WithSchema,
+} from "../tickets/companions";
+import {
   type OrderWrite, type Ticket, type TicketExtra, type TicketType, type TicketWrite, typeSettings,
 } from "../types";
 import { applyCode, lookUpCode, type PriceLine, priceLines, PromotionCodeSchema } from "./discounts";
@@ -32,6 +35,9 @@ const AttendeeSchema = z.object({
   phone: z.string().trim().min(6).max(20).optional().openapi({ description: "Required for LAN-group tickets" }),
   discord: z.string().trim().max(50).optional(),
   extras: z.array(z.object({ extraId: z.string().min(1), option: z.string().optional() })).max(10).default([]),
+  with: WithSchema.openapi({
+    description: `${WITH_DESCRIPTION} A ticket already sold must be one of the signed-in buyer's.`,
+  }),
 });
 
 const PurchaseSchema = z.object({
@@ -70,7 +76,8 @@ purchase.openapi(
       "Creates an order with its tickets pending and returns the Stripe Checkout to send the " +
       "buyer to. Every ticket, free ones included, becomes active when Stripe confirms payment; " +
       "an unpaid checkout expires after 30 minutes and gives its places back. An order needs at " +
-      "least one paid ticket: free tickets (children) can't be bought alone.",
+      "least one paid ticket: free tickets (children) can't be bought alone. A companion ticket " +
+      "goes `with` someone in the order or with one of the buyer's tickets.",
     ...auditedAs("ticket.purchase", "ticket.checkoutFailed"),
     middleware: [optionalAuth] as const,
     request: {
@@ -90,12 +97,16 @@ purchase.openapi(
           },
         },
       },
-      400: { description: "Invalid body, unknown type or extra, a partial pack, a missing phone, or only free tickets" },
+      400: {
+        description: "Invalid body, unknown type, extra or ticket, a partial pack, a missing phone, only free " +
+          "tickets, or a companion without a valid `with`",
+      },
       401: { description: "A token was sent but isn't valid" },
       403: { description: "Online sales are open to staff only for now (testing), or the account is suspended" },
       409: {
-        description: "A ticket type or extra is sold out or not on sale, or the promotion code can't be used " +
-          "(e.g. it was used up since the quote); quote again to show why",
+        description: "A ticket type or extra is sold out or not on sale, the promotion code can't be used " +
+          "(e.g. it was used up since the quote; quote again to show why), or the ticket a companion " +
+          "goes with can't take one (not active, already has one, or its type stopped taking them)",
       },
       502: { description: "Stripe checkout could not be started, or the promotion code could not be checked; nothing was reserved" },
     },
@@ -126,10 +137,15 @@ purchase.openapi(
     if (code && !promo) throw new HTTPException(409, { message: `${code} doesn't exist` });
 
     // One transaction so the stock checks and the tickets that take the stock can't interleave
-    const { types, tickets, lines } = await db.runTransaction(async (tx) => {
+    const { types, tickets, lines, hosts } = await db.runTransaction(async (tx) => {
       const extras = await loadExtras(tx, attendees.flatMap((a) => a.extras.map((e) => e.extraId)));
+      const hosts = await loadHostTickets(tx, attendees, user ?? null);
       const types = await reserveCapacity(tx, attendees);
       const packs = packIds(attendees, types);
+      const { companionOf, companionId } = companionLinks(
+        pairCompanions(attendees, types, hosts),
+        ticketRefs.map((ref) => ref.id),
+      );
 
       attendees.forEach((a) => {
         if (isLanGroup(types.get(a.typeId)!) && !a.phone) {
@@ -182,8 +198,13 @@ purchase.openapi(
             const extra = extras.get(e.extraId)!;
             return { extraId: extra.id, name: extra.name, option: e.option ?? null, price: extra.price };
           }),
+          ...(companionOf[i] && { companionOf: companionOf[i] }),
+          ...(companionId.has(ticketRefs[i].id) && { companionId: companionId.get(ticketRefs[i].id) }),
         };
       });
+      for (const [id, { ref }] of hosts) {
+        tx.update(ref, { companionId: companionId.get(id) } satisfies Partial<TicketWrite>);
+      }
 
       tickets.forEach((ticket, i) => {
         tx.set(ticketRefs[i], ticket);
@@ -197,6 +218,7 @@ purchase.openapi(
             orderId: orderRef.id,
             extras: ticket.extras!.map((e) => e.extraId),
             ...(promo && { promotionCode: promo.code }),
+            ...(ticket.companionOf && { companionOf: ticket.companionOf }),
           },
         });
       });
@@ -217,7 +239,7 @@ purchase.openapi(
         paidAt: null,
       } satisfies OrderWrite);
 
-      return { types, tickets, lines };
+      return { types, tickets, lines, hosts };
     });
 
     let session: Stripe.Checkout.Session;
@@ -241,6 +263,7 @@ purchase.openapi(
         releaseCapacity(tx, unitsByType(attendees, types));
         releasePlaces(tx, tickets);
         releaseExtras(tx, tickets as unknown as Ticket[]);
+        freeHosts(tx, hosts);
         tx.delete(orderRef);
         ticketRefs.forEach((ref, i) => {
           tx.delete(ref);
@@ -260,6 +283,11 @@ purchase.openapi(
     return c.json({ orderId: orderRef.id, checkoutUrl: session.url! }, 200);
   },
 );
+
+/** Tickets sold before that were to take a companion from this order, which is dropped. */
+function freeHosts(tx: FirebaseFirestore.Transaction, hosts: Map<string, HostTicket>): void {
+  for (const { ref } of hosts.values()) tx.update(ref, { companionId: null } satisfies Partial<TicketWrite>);
+}
 
 /** What Stripe charges: the order's lines, leaving out the free ones (the order keeps them). */
 function lineItems(lines: PriceLine[]): Stripe.Checkout.SessionCreateParams.LineItem[] {

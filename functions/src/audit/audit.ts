@@ -82,6 +82,7 @@ export const AUDIT_ACTIONS = {
       price: z.int(),
       paymentMethod: z.enum(PAYMENT_METHODS),
       packId: z.string().nullable().optional(),
+      companionOf: z.string().optional(),
     }),
   },
   "ticket.checkin": {
@@ -110,6 +111,7 @@ export const AUDIT_ACTIONS = {
       orderId: z.string().optional(),
       extras: z.array(z.string()).optional(),
       promotionCode: z.string().optional(),
+      companionOf: z.string().optional(),
     }),
   },
   "ticket.checkoutFailed": {
@@ -138,7 +140,7 @@ export const AUDIT_ACTIONS = {
   },
   "ticket.assign": {
     description: "Given by an admin to a registered user, using a place but no payment",
-    details: z.object({ typeId: z.string(), uid: z.string(), email: z.string() }),
+    details: z.object({ typeId: z.string(), uid: z.string(), email: z.string(), companionOf: z.string().optional() }),
   },
   "user.promote": {
     description: "Promoted to staff",

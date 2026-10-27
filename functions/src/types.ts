@@ -187,6 +187,9 @@ export type Ticket = {
   orderId?: string;
   holder?: TicketHolder;
   extras?: TicketExtra[];
+  // Absent on tickets that never had a companion link
+  companionOf?: string;          // a companion ticket's host ticket
+  companionId?: string | null;   // a host's live companion; cleared when the companion is cancelled
 };
 
 /** The attendee's details from the purchase form. */

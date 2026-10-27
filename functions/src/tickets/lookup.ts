@@ -3,7 +3,8 @@ import { getFirestore } from "firebase-admin/firestore";
 
 import { requireStaff, type Env } from "../auth";
 import { bearerAuth, CheckinsSchema, checkinTimes, EmailSchema } from "../schemas";
-import { PAYMENT_METHODS, TICKET_STATUSES, type Ticket } from "../types";
+import { PAYMENT_METHODS, TICKET_STATUSES, type Ticket, typeSettings } from "../types";
+import { currentTypes } from "./typeNames";
 
 export const ticketLookup = new OpenAPIHono<Env>();
 
@@ -19,6 +20,12 @@ const FoundTicketSchema = z.object({
   }),
   days: z.array(z.string()),
   checkins: CheckinsSchema,
+  companionOf: z.string().nullable().openapi({ description: "For a companion ticket, the ticket it goes with" }),
+  companionId: z.string().nullable().openapi({ description: "Its companion ticket, if it has one" }),
+  allowsCompanion: z.boolean().openapi({
+    description: "Whether its type takes companions now; with status active and no companionId, it can take one",
+  }),
+  isCompanion: z.boolean().openapi({ description: "Whether its type is a companion type" }),
 });
 
 ticketLookup.openapi(
@@ -47,10 +54,12 @@ ticketLookup.openapi(
   async (c) => {
     const { email } = c.req.valid("query");
 
-    const snap = await getFirestore()
-      .collection("tickets")
-      .where("holderEmail", "==", email)
-      .get();
+    const db = getFirestore();
+    const snap = await db.collection("tickets").where("holderEmail", "==", email).get();
+
+    // The type's settings as they are now, which is what decides if a ticket can take a companion
+    const types = await currentTypes(snap.docs.map((d) => (d.data() as Ticket).typeId));
+    const settings = new Map([...types].map(([id, type]) => [id, typeSettings(type)]));
 
     const result = snap.docs.map((d) => {
       const t = d.data() as Ticket;
@@ -64,6 +73,10 @@ ticketLookup.openapi(
         paymentMethod: t.paymentMethod,
         days: t.days,
         checkins: checkinTimes(t.checkins),
+        companionOf: t.companionOf ?? null,
+        companionId: t.companionId ?? null,
+        allowsCompanion: settings.get(t.typeId)?.allowsCompanion ?? false,
+        isCompanion: settings.get(t.typeId)?.isCompanion ?? false,
       };
     });
 

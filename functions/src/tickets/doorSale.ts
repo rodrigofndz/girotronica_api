@@ -9,6 +9,7 @@ import { queueTicketEmails } from "../mail";
 import { bearerAuth, EmailSchema } from "../schemas";
 import { PAYMENT_METHODS, type TicketWrite, typeSettings } from "../types";
 import { packIds, reserveCapacity } from "./capacity";
+import { companionLinks, loadHostTickets, pairCompanions, WithSchema } from "./companions";
 
 export const doorSale = new OpenAPIHono<Env>();
 
@@ -20,6 +21,7 @@ const DoorSaleSchema = z.object({
         typeId: z.string().min(1),
         holderName: z.string().min(1),
         holderEmail: EmailSchema,
+        with: WithSchema,
       }),
     )
     .min(1)
@@ -40,7 +42,8 @@ const doorSaleRoute = createRoute({
   summary: "Sell tickets in person",
   description:
     "Staff or admin. Tickets are created active with no account attached; " +
-    "`soldBy` and `paymentMethod` are recorded for till reconciliation.",
+    "`soldBy` and `paymentMethod` are recorded for till reconciliation. A companion ticket goes " +
+    "`with` someone in the same sale or with any active ticket.",
   security: bearerAuth,
   ...auditedAs("ticket.doorSale"),
   middleware: [requireStaff] as const,
@@ -52,9 +55,12 @@ const doorSaleRoute = createRoute({
       description: "Tickets created",
       content: { "application/json": { schema: z.array(SoldTicketSchema) } },
     },
-    400: { description: "Invalid body or unknown ticket type" },
+    400: { description: "Invalid body, unknown ticket type or ticket, or a companion without a valid `with`" },
     403: { description: "Caller is not staff or admin" },
-    409: { description: "A requested ticket type is sold out" },
+    409: {
+      description: "A requested ticket type is sold out, or the ticket a companion goes with can't take one " +
+        "(not active, already has one, or its type doesn't take them)",
+    },
   },
 });
 
@@ -69,11 +75,20 @@ doorSale.openapi(doorSaleRoute, async (c) => {
 
   // One transaction so the capacity check and the tickets that consume it can't interleave
   const types = await db.runTransaction(async (tx) => {
+    const hosts = await loadHostTickets(tx, items, "anyone");
     const reserved = await reserveCapacity(tx, items);
     const packs = packIds(items, reserved);
+    const { companionOf, companionId } = companionLinks(
+      pairCompanions(items, reserved, hosts),
+      ticketRefs.map((ref) => ref.id),
+    );
+    for (const [id, { ref }] of hosts) {
+      tx.update(ref, { companionId: companionId.get(id) } satisfies Partial<TicketWrite>);
+    }
 
     items.forEach((item, i) => {
       const type = reserved.get(item.typeId)!;
+      const host = companionOf[i];
       tx.set(ticketRefs[i], {
         uid: null,
         typeId: item.typeId,
@@ -90,12 +105,14 @@ doorSale.openapi(doorSaleRoute, async (c) => {
         packId: packs[i],
         poolId: type.poolId ?? null,
         checkins: {},
+        ...(host && { companionOf: host }),
+        ...(companionId.has(ticketRefs[i].id) && { companionId: companionId.get(ticketRefs[i].id) }),
       } satisfies TicketWrite);
       audit(tx, {
         actor: seller,
         action: "ticket.doorSale",
         target: { id: ticketRefs[i].id, label: item.holderName },
-        details: { typeId: item.typeId, price: type.price, paymentMethod, packId: packs[i] },
+        details: { typeId: item.typeId, price: type.price, paymentMethod, packId: packs[i], ...(host && { companionOf: host }) },
       });
     });
 

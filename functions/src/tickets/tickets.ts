@@ -3,8 +3,8 @@ import { getFirestore } from "firebase-admin/firestore";
 
 import type { Env } from "../auth";
 import { bearerAuth, CheckinsSchema, checkinTimes } from "../schemas";
-import type { Ticket } from "../types";
-import { typeNames } from "./typeNames";
+import { type Ticket, typeSettings } from "../types";
+import { currentTypes } from "./typeNames";
 
 export const tickets = new OpenAPIHono<Env>();
 
@@ -20,6 +20,12 @@ const OwnTicketSchema = z.object({
   days: z.array(z.string()),
   isLanParty: z.boolean().openapi({ description: "Copied from its type when sold, so it stays once the type closes" }),
   checkins: CheckinsSchema,
+  companionOf: z.string().nullable().openapi({ description: "For a companion ticket, the ticket it goes with" }),
+  companionId: z.string().nullable().openapi({ description: "Its companion ticket, if it has one" }),
+  allowsCompanion: z.boolean().openapi({
+    description: "Whether its type takes companions now, even once its sale has closed; with no companionId, it can take one",
+  }),
+  isCompanion: z.boolean().openapi({ description: "Whether its type is a companion type" }),
 });
 
 const listRoute = createRoute({
@@ -45,18 +51,24 @@ tickets.openapi(listRoute, async (c) => {
     .where("status", "==", "active")
     .get();
 
-  const names = await typeNames(snap.docs.map((d) => (d.data() as Ticket).typeId));
+  const types = await currentTypes(snap.docs.map((d) => (d.data() as Ticket).typeId));
   const result = snap.docs.map((d) => {
     const t = d.data() as Ticket;
+    const type = types.get(t.typeId);
+    const settings = type && typeSettings(type);
     return {
       id: d.id,
       typeId: t.typeId,
-      typeName: names.get(t.typeId) ?? null,
+      typeName: type?.name || null,
       code: t.code,
       holderName: t.holderName,
       days: t.days,
       isLanParty: t.isLanParty ?? false,
       checkins: checkinTimes(t.checkins),
+      companionOf: t.companionOf ?? null,
+      companionId: t.companionId ?? null,
+      allowsCompanion: settings?.allowsCompanion ?? false,
+      isCompanion: settings?.isCompanion ?? false,
     };
   });
 
