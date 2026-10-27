@@ -3,7 +3,7 @@ import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from "vites
 
 import {
   apiFetch, attendee, auditEntries, buyOnline, createUser, orderDoc, resetEmulators, seedTicketType,
-  sendStripeEvent, soldCount, startApi, stopApi, type TestUser,
+  sendStripeEvent, soldCount, startApi, stopApi, ticketStatus, type TestUser,
 } from "./helpers";
 
 // Online sales ship switched off; these tests cover the code for when it is turned on
@@ -162,6 +162,18 @@ describe("a companion for a ticket bought before", () => {
     expect((await ticket(host)).companionId).toBeNull();
   });
 
+  it("frees the ticket again when the checkout expires unpaid", async () => {
+    const host = await ownLanTicket();
+    const res = await buyOnline([companion({ with: host })], { token: member.token });
+
+    await sendStripeEvent("checkout.session.expired", {
+      id: "cs_test_1", object: "checkout.session", metadata: { orderId: res.body.orderId },
+    });
+
+    expect((await ticket(host)).companionId).toBeNull();
+    expect((await buyOnline([companion({ with: host })], { token: member.token })).status).toBe(200);
+  });
+
   it("shows in the buyer's tickets which have a companion", async () => {
     const host = await ownLanTicket();
     const res = await buyOnline([companion({ with: host })], { token: member.token });
@@ -273,6 +285,70 @@ describe("assigning a companion", () => {
     expect((await assign({ typeId: "companion" })).status).toBe(400);
     expect((await assign({ typeId: "general", with: host })).status).toBe(400);
     expect(await soldCount("companion")).toBe(0);
+  });
+});
+
+describe("cancelling", () => {
+  it("cancels a ticket's companion with it, logged as the canceller's", async () => {
+    const [host, guest] = (await doorSale([{ typeId: "lan" }, { typeId: "companion", with: 0 }])).body.map((t: { id: string }) => t.id);
+
+    await cancel(host);
+
+    expect(await ticketStatus(guest)).toBe("cancelled");
+    expect(await soldCount("companion")).toBe(0);
+    expect(await auditEntries("ticket.cancelWithHost")).toEqual([
+      expect.objectContaining({ targetId: guest, actorUid: staff.uid, details: { hostId: host, previousStatus: "active" } }),
+    ]);
+  });
+
+  it("lets a ticket take another companion once its own is cancelled", async () => {
+    const [host, guest] = (await doorSale([{ typeId: "lan" }, { typeId: "companion", with: 0 }])).body.map((t: { id: string }) => t.id);
+
+    await cancel(guest);
+
+    expect(await ticketStatus(host)).toBe("active");
+    expect((await ticket(host)).companionId).toBeNull();
+    expect((await doorSale([{ typeId: "companion", with: host }])).status).toBe(200);
+    expect(await auditEntries("ticket.cancelWithHost")).toEqual([]);
+  });
+
+  it("cancels a companion bought apart when its ticket is refunded", async () => {
+    const hostOrder = await buyOnline([player()], { token: member.token });
+    await pay(hostOrder.body.orderId, "pi_host");
+    const [host] = await ticketIdsOf(hostOrder.body.orderId);
+    const guestOrder = await buyOnline([companion({ with: host })], { token: member.token });
+    await pay(guestOrder.body.orderId, "pi_guest");
+    const [guest] = await ticketIdsOf(guestOrder.body.orderId);
+
+    await sendStripeEvent("charge.refunded", {
+      id: "ch_1", object: "charge", payment_intent: "pi_host", amount: 3500, amount_refunded: 3500,
+    });
+
+    expect(await ticketStatus(guest)).toBe("cancelled");
+    expect((await auditEntries("ticket.cancelWithHost"))[0]).toMatchObject({ targetId: guest, actorRole: "stripe" });
+  });
+
+  it("cancels both once when they go together", async () => {
+    const res = await buyOnline([player(), companion({ with: 0 })]);
+
+    await sendStripeEvent("checkout.session.expired", {
+      id: "cs_test_1", object: "checkout.session", metadata: { orderId: res.body.orderId },
+    });
+
+    expect(await soldCount("lan")).toBe(0);
+    expect(await soldCount("companion")).toBe(0);
+    expect(await auditEntries("ticket.expired")).toHaveLength(2);
+    expect(await auditEntries("ticket.cancelWithHost")).toEqual([]);
+  });
+
+  it("cancels the companion when its ticket's account is suspended", async () => {
+    const host = await ownLanTicket();
+    const [{ id: guest }] = (await doorSale([{ typeId: "companion", with: host, holderEmail: "parent@example.com" }])).body;
+
+    await apiFetch("POST", `/users/${member.uid}/suspend`, { token: staff.token });
+
+    expect(await ticketStatus(guest)).toBe("cancelled");
+    expect((await auditEntries("ticket.cancelWithHost"))[0]).toMatchObject({ targetId: guest, actorUid: staff.uid });
   });
 });
 
