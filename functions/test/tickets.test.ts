@@ -145,7 +145,7 @@ describe("own tickets", () => {
     const res = await apiFetch("GET", "/tickets", { token: attendee.token });
 
     expect(Object.keys(res.body[0]).sort()).toEqual(
-      ["checkins", "code", "days", "holderName", "id", "isLanParty", "typeId", "typeName"],
+      ["allowsCompanion", "checkins", "code", "companionId", "companionOf", "days", "holderName", "id", "isCompanion", "isLanParty", "typeId", "typeName"],
     );
   });
 });
