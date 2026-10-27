@@ -95,6 +95,10 @@ export type TicketType = {
   disclaimer?: string | null;    // small print under the card
   // Places it shares with other types, on top of its own capacity; absent or null: none
   poolId?: string | null;
+  // Companions: a cheaper ticket for someone who comes along with a ticket holder (e.g. a
+  // parent with a LAN player). Set by an admin; absent on older types, read through typeSettings()
+  allowsCompanion?: boolean; // each of its tickets may bring one companion
+  isCompanion?: boolean;     // it's a companion ticket, sold only linked to a host ticket
 };
 
 /**
@@ -138,7 +142,9 @@ export function priceAt(
 }
 
 /** A type's admin settings with the defaults for types stored before the fields existed. */
-export function typeSettings(type: Pick<TicketType, "category" | "packSize" | "entries" | "extrasFrom">) {
+export function typeSettings(
+  type: Pick<TicketType, "category" | "packSize" | "entries" | "extrasFrom" | "allowsCompanion" | "isCompanion">,
+) {
   const category = type.category ?? "general";
   return {
     category,
@@ -147,6 +153,8 @@ export function typeSettings(type: Pick<TicketType, "category" | "packSize" | "e
     extrasFrom: type.extrasFrom !== undefined
       ? type.extrasFrom
       : (EXTRA_GROUPS as readonly string[]).includes(category) ? (category as ExtraGroup) : null,
+    allowsCompanion: type.allowsCompanion ?? false,
+    isCompanion: type.isCompanion ?? false,
   };
 }
 

@@ -91,6 +91,8 @@ async function syncProduct(actor: User, product: Stripe.Product, prices: Stripe.
         description: product.description ?? null,
         features: [],
         disclaimer: null,
+        allowsCompanion: false,
+        isCompanion: false,
       };
       const changes = Object.fromEntries(Object.entries(type).map(([field, to]) => [field, { from: null, to }]));
 

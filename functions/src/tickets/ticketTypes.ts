@@ -68,6 +68,14 @@ const TicketTypeSchema = z.object({
   poolId: z.string().nullable().openapi({
     description: "Shared places it sells from as well as its own capacity (see /capacity-pools); null: none",
   }),
+  allowsCompanion: z.boolean().openapi({
+    description: "Each of its tickets may bring one companion (a ticket of an isCompanion type); default false",
+  }),
+  isCompanion: z.boolean().openapi({
+    description:
+      "A companion ticket: only sold linked to a ticket of a type that allowsCompanion, one per " +
+      "ticket; default false. Can't be a pack",
+  }),
 });
 
 /** Trimmed; an empty string means "no text" (null). */
@@ -79,12 +87,22 @@ const windowInOrder = (type: { salesStart?: string | null; salesEnd?: string | n
 
 const WINDOW_ORDER_MESSAGE = "salesStart must be before salesEnd";
 
+/** Why a type's companion settings don't fit together, or null when they do. */
+function companionProblem(type: Parameters<typeof typeSettings>[0]): string | null {
+  const { isCompanion, allowsCompanion, packSize } = typeSettings(type);
+  if (!isCompanion) return null;
+  if (allowsCompanion) return "a companion type can't take companions itself";
+  if (packSize > 1) return "a companion type can't be a pack; each companion goes with one ticket";
+  return null;
+}
+
 // What the web may change. Price, name source and the Stripe link come from the Stripe sync;
 // strict so trying to set one of those (or `sold`) is an error, not silently ignored.
 // Only checks the window when both ends are in the patch; the handler checks it against the stored type
 const UpdateSchema = TicketTypeSchema.pick({
   name: true, capacity: true, isLanParty: true, salesStart: true, salesEnd: true,
   category: true, entries: true, extrasFrom: true, packSize: true, poolId: true,
+  allowsCompanion: true, isCompanion: true,
 })
   .extend({
     days: z.array(isoDate).min(1),
@@ -197,7 +215,8 @@ adminTicketTypes.openapi(
       "Capacity cannot go below what is already sold; set it equal to `sold` to stop sales. " +
       "Changing `days`, `isLanParty` or `entries` does not affect tickets already issued; " +
 "`packSize` can't change once units are sold, since they were sold as packs of the old size; " +
-      "nor can `poolId`, since its tickets give their places back to the pool they took them from. " +
+      "nor can `poolId`, since its tickets give their places back to the pool they took them from, " +
+      "nor `isCompanion`. Turning `allowsCompanion` off only stops new companions; those sold stay. " +
       "Send null for `salesStart` or `salesEnd` to remove that bound.",
     security: bearerAuth,
     ...auditedAs("ticketType.update"),
@@ -211,10 +230,13 @@ adminTicketTypes.openapi(
         description: "Updated",
         content: { "application/json": { schema: TicketTypeSchema } },
       },
-      400: { description: "Invalid body, an unknown poolId, or the sale window would end before it starts" },
+      400: {
+        description: "Invalid body, an unknown poolId, the sale window would end before it starts, or a " +
+          "companion type that's a pack or allows companions",
+      },
       403: { description: "Caller is not admin" },
       404: { description: "No such ticket type" },
-      409: { description: "Capacity is below the number already sold, or a pack size or pool change after sales" },
+      409: { description: "Capacity is below the number already sold, or a pack size, pool or isCompanion change after sales" },
     },
   }),
   async (c) => {
@@ -252,10 +274,20 @@ adminTicketTypes.openapi(
         });
       }
 
+      // Its tickets were sold linked to a host, or not, and stay that way
+      const isCompanion = typeSettings(current).isCompanion;
+      if (patch.isCompanion !== undefined && patch.isCompanion !== isCompanion && sold > 0) {
+        throw new HTTPException(409, {
+          message: `${sold} units were sold ${isCompanion ? "as" : "not as"} companions, so that can't change`,
+        });
+      }
+
       const merged = { ...current, ...patch };
       if (!windowInOrder(merged)) {
         throw new HTTPException(400, { message: WINDOW_ORDER_MESSAGE });
       }
+      const companion = companionProblem(merged);
+      if (companion) throw new HTTPException(400, { message: companion });
 
       const pools = new Map<string, CapacityPool>();
       if (merged.poolId) {
@@ -305,7 +337,10 @@ adminTicketTypes.openapi(
     request: { body: { required: true, content: { "application/json": { schema: CreateSchema } } } },
     responses: {
       201: { description: "Created", content: { "application/json": { schema: TicketTypeSchema } } },
-      400: { description: "Invalid body, a price was sent, an unknown poolId, or the sale window ends before it starts" },
+      400: {
+        description: "Invalid body, a price was sent, an unknown poolId, the sale window ends before it starts, " +
+          "or a companion type that's a pack or allows companions",
+      },
       403: { description: "Caller is not admin" },
       409: { description: "The id is taken" },
     },
@@ -332,11 +367,15 @@ adminTicketTypes.openapi(
       description: null,
       features: [],
       disclaimer: null,
+      allowsCompanion: false,
+      isCompanion: false,
       ...fields,
     };
     if (!windowInOrder(type)) {
       throw new HTTPException(400, { message: WINDOW_ORDER_MESSAGE });
     }
+    const companion = companionProblem(type);
+    if (companion) throw new HTTPException(400, { message: companion });
 
     const pools = await db.runTransaction(async (tx) => {
       const [existing, pool] = await Promise.all([
