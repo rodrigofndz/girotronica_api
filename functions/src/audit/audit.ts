@@ -2,7 +2,7 @@ import { z } from "@hono/zod-openapi";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 
 import type { User } from "../auth";
-import { PAYMENT_METHODS, TICKET_STATUSES, type Role } from "../types";
+import { ENTRY_RULES, PAYMENT_METHODS, TICKET_STATUSES, type Role } from "../types";
 
 export const AUDIT_COLLECTION = "auditLog";
 
@@ -131,6 +131,10 @@ export const AUDIT_ACTIONS = {
   "ticket.partiallyRefunded": {
     description: "Partly refunded in Stripe; left active for an admin to decide",
     details: z.object({ ...stripeEvent, chargeId: z.string(), amount: z.int(), amountRefunded: z.int() }),
+  },
+  "ticket.entriesSync": {
+    description: "Entry rule brought in line with its type's, by an admin's maintenance script",
+    details: z.object({ typeId: z.string(), from: z.enum(ENTRY_RULES), to: z.enum(ENTRY_RULES) }),
   },
   "ticket.assign": {
     description: "Given by an admin to a registered user, using a place but no payment",
