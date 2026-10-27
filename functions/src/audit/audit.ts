@@ -101,6 +101,12 @@ export const AUDIT_ACTIONS = {
     description: "Cancelled because the account it's linked to, or its holder's account, was suspended",
     details: z.object({ uid: z.string(), previousStatus: z.enum(TICKET_STATUSES) }),
   },
+  "ticket.cancelWithHost": {
+    description:
+      "Companion ticket cancelled because the ticket it goes with was, by whoever cancelled that one. " +
+      "Not refunded: if it was paid for apart, refund it in Stripe by hand",
+    details: z.object({ hostId: z.string(), previousStatus: z.enum(TICKET_STATUSES) }),
+  },
   "ticket.purchase": {
     description: "Bought online; waiting for payment, or active at once when the order is free",
     // `price` is the type's (per ticket, or per whole pack), before any promotion code, whose

@@ -78,7 +78,7 @@ async function setSuspended(actor: User, uid: string, suspended: boolean) {
     if ((current.suspended ?? false) !== suspended) {
       // Reads first: a transaction can't read after it writes
       const cancelled = suspended
-        ? await cancelInTransaction(tx, await ticketsOfAccount(tx, uid, current.email))
+        ? await cancelInTransaction(tx, await ticketsOfAccount(tx, uid, current.email), actor)
         : [];
       cancelledTickets = cancelled.length;
       for (const { id, ticket } of cancelled) {
@@ -134,7 +134,7 @@ suspension.openapi(
       "including friends' tickets bought in the same order; their places go back on sale. " +
       "Nothing is refunded: refund paid ones in Stripe by hand. Reactivating doesn't restore them.",
     security: bearerAuth,
-    ...auditedAs("user.suspend", "ticket.cancelOnSuspend"),
+    ...auditedAs("user.suspend", "ticket.cancelOnSuspend", "ticket.cancelWithHost"),
     middleware: [requireStaff] as const,
     request: { params },
     responses,

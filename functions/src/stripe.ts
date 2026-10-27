@@ -186,7 +186,7 @@ stripeWebhook.post("/", async (c) => {
         } else {
           await db.runTransaction(async (tx) => {
             const docs = await tx.getAll(...snap.docs.map((d) => d.ref));
-            for (const { id, ticket } of await cancelInTransaction(tx, docs)) {
+            for (const { id, ticket } of await cancelInTransaction(tx, docs, STRIPE_ACTOR)) {
               audit(tx, {
                 actor: STRIPE_ACTOR,
                 action: "ticket.refunded",
@@ -211,7 +211,7 @@ stripeWebhook.post("/", async (c) => {
         : [];
       // Only slots still waiting for payment: a paid ticket must never be voided by an expiry
       const unpaid = docs.filter((doc) => (doc.data() as Ticket | undefined)?.status === "pending");
-      const cancelled = await cancelInTransaction(tx, unpaid);
+      const cancelled = await cancelInTransaction(tx, unpaid, STRIPE_ACTOR);
       if (order?.exists && (order.data() as Order).status === "pending") {
         tx.update(order.ref, { status: "expired" } satisfies Partial<OrderWrite>);
       }
