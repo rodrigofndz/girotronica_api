@@ -2,8 +2,6 @@ import { z } from "@hono/zod-openapi";
 import { getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 
-import type { User } from "../auth";
-import { COMPANIONS_ADMIN_ONLY } from "../features";
 import { type Ticket, type TicketType, typeSettings } from "../types";
 
 /**
@@ -18,17 +16,6 @@ export const WITH_DESCRIPTION =
 
 export const WithSchema = z.union([z.int().nonnegative(), z.string().min(1)]).optional()
   .openapi({ description: WITH_DESCRIPTION });
-
-/** Whether `user` may see and get companion types now (see COMPANIONS_ADMIN_ONLY). */
-export const seesCompanions = (user: User | undefined) => !COMPANIONS_ADMIN_ONLY || user?.role === "admin";
-
-/** Refuses companion types to anyone who can't get them yet, as if they weren't on sale. */
-export function refuseHiddenCompanions(types: Map<string, Omit<TicketType, "id">>, user: User | undefined) {
-  if (seesCompanions(user)) return;
-  for (const [id, type] of types) {
-    if (typeSettings(type).isCompanion) throw new HTTPException(409, { message: `not on sale: ${id}` });
-  }
-}
 
 /** A host ticket sold before, read for linking a companion to it. */
 export type HostTicket = { ref: FirebaseFirestore.DocumentReference; ticket: Ticket };

@@ -4,16 +4,15 @@ import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
 
 import { audit, auditedAs } from "../audit/audit";
-import { type Env, type GuestEnv, optionalAuth, requireAdmin, requireStaff } from "../auth";
+import { requireAdmin, requireStaff, type Env } from "../auth";
 import { bearerAuth } from "../schemas";
 import { stripeSecretKey } from "../stripe";
 import {
   type CapacityPool, ENTRY_RULES, EXTRA_GROUPS, priceAt, TICKET_CATEGORIES, type TicketType, typeSettings,
 } from "../types";
 import { isOnSale, POOLS_COLLECTION } from "./capacity";
-import { seesCompanions } from "./companions";
 
-export const ticketTypes = new OpenAPIHono<GuestEnv>();
+export const ticketTypes = new OpenAPIHono<Env>();
 export const adminTicketTypes = new OpenAPIHono<Env>();
 
 // One online order holds at most 20 people, so a bigger pack couldn't be bought
@@ -172,9 +171,7 @@ ticketTypes.openapi(
     description:
       "Public. Only the types on sale right now: days set and the sale window open. Sold-out " +
       "ones stay, with nothing remaining; types not set up yet, not open yet or closed are left " +
-      "out. Staff and admins see them all in GET /ticket-types/all. Companion types are left " +
-      "out for now unless the caller signs in as an admin (a token is optional here).",
-    middleware: [optionalAuth] as const,
+      "out. Staff and admins see them all in GET /ticket-types/all.",
     responses: {
       200: {
         description: "Ticket types",
@@ -182,10 +179,7 @@ ticketTypes.openapi(
       },
     },
   }),
-  async (c) => {
-    const companions = seesCompanions(c.get("user"));
-    return c.json((await listTypes()).filter((type) => type.onSale && (companions || !type.isCompanion)), 200);
-  },
+  async (c) => c.json((await listTypes()).filter((type) => type.onSale), 200),
 );
 
 adminTicketTypes.openapi(
