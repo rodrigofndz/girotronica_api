@@ -7,7 +7,7 @@ import {
 } from "./helpers";
 
 // Online sales ship switched off; these tests cover the code for when it is turned back on
-vi.mock("../src/features", () => ({ ONLINE_SALES: true, ONLINE_SALES_MODE: "public", COMPANIONS_ADMIN_ONLY: false }));
+vi.mock("../src/features", () => ({ ONLINE_SALES: true, ONLINE_SALES_MODE: "public" }));
 
 const newTicket = (status: string, extra: Record<string, unknown> = {}) =>
   getFirestore().collection("tickets").add({

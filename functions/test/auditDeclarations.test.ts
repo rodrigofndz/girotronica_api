@@ -4,7 +4,7 @@ import { AUDIT_ACTION_NAMES } from "../src/audit/audit";
 import { apiFetch, startApi, stopApi } from "./helpers";
 
 // With online sales on, so their routes (buying, pricing, promotion codes) are checked too
-vi.mock("../src/features", () => ({ ONLINE_SALES: true, ONLINE_SALES_MODE: "public", COMPANIONS_ADMIN_ONLY: false }));
+vi.mock("../src/features", () => ({ ONLINE_SALES: true, ONLINE_SALES_MODE: "public" }));
 
 beforeAll(startApi);
 afterAll(stopApi);
