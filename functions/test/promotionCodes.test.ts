@@ -251,6 +251,46 @@ describe("buying with a code", () => {
     expect((await buy([attendee(), attendee()], "DOS")).status).toBe(200);
   });
 
+  it("takes a code once per buyer email, counting only paid orders", async () => {
+    givenCodes(promo("AMICS20", { percent_off: 20 }));
+    const first = await buy([attendee()], "AMICS20");
+    const retry = await buy([attendee()], "AMICS20");
+    expect(retry.status).toBe(200);
+
+    await sendStripeEvent("checkout.session.completed", {
+      id: "cs_test_1", object: "checkout.session", metadata: { orderId: first.body.orderId },
+      payment_status: "paid", payment_intent: "pi_1",
+    });
+    const again = (email: string) => apiFetch("POST", "/tickets", {
+      body: { buyer: { ...buyerDetails, email }, attendees: [attendee()], promotionCode: "amics20" },
+    });
+
+    expect(await again(buyerDetails.email.toUpperCase())).toMatchObject({ status: 409, body: "AMICS20 has already been used" });
+    expect((await again("other@example.com")).status).toBe(200);
+    expect((await buy([attendee()])).status).toBe(200);
+  });
+
+  it("shows a code the buyer's email already paid with as not applied, when the quote has the email", async () => {
+    givenCodes(promo("AMICS20", { percent_off: 20 }));
+    const first = await buy([attendee()], "AMICS20");
+    const quoteFor = (email?: string) =>
+      apiFetch("POST", "/tickets/quote", { body: { attendees: [attendee()], promotionCode: "AMICS20", email } });
+    expect((await quoteFor(buyerDetails.email)).body).toMatchObject({ discount: 180, promotionCode: { applied: true } });
+
+    await sendStripeEvent("checkout.session.completed", {
+      id: "cs_test_1", object: "checkout.session", metadata: { orderId: first.body.orderId },
+      payment_status: "paid", payment_intent: "pi_1",
+    });
+
+    const used = await quoteFor(buyerDetails.email.toUpperCase());
+    expect(used.body).toMatchObject({ discount: 0, total: 900 });
+    expect(used.body.promotionCode).toMatchObject({
+      applied: false, problem: { reason: "already_used", message: "AMICS20 has already been used" },
+    });
+    expect((await quoteFor("other@example.com")).body).toMatchObject({ discount: 180 });
+    expect((await quoteFor()).body).toMatchObject({ discount: 180 });
+  });
+
   it("asks Stripe for no discount without a code", async () => {
     const res = await buy([attendee()]);
 
