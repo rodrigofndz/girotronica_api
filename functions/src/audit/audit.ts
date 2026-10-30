@@ -6,7 +6,7 @@ import { ENTRY_RULES, PAYMENT_METHODS, TICKET_STATUSES, type Role } from "../typ
 
 export const AUDIT_COLLECTION = "auditLog";
 
-export const AUDIT_TARGETS = ["ticket", "ticketType", "extra", "user", "capacityPool"] as const;
+export const AUDIT_TARGETS = ["ticket", "ticketType", "extra", "user", "capacityPool", "promotionCode"] as const;
 export type AuditTarget = (typeof AUDIT_TARGETS)[number];
 
 export const SCAN_REJECTIONS = ["already_used", "wrong_day", "invalid", "not_found"] as const;
@@ -147,6 +147,18 @@ export const AUDIT_ACTIONS = {
   "ticket.assign": {
     description: "Given by an admin to a registered user, using a place but no payment",
     details: z.object({ typeId: z.string(), uid: z.string(), email: z.string(), companionOf: z.string().optional() }),
+  },
+  "promotionCode.redeem": {
+    description: "A buyer's order with the code was paid, which is when Stripe counts it as used. " +
+      "The target is the Stripe promotion code; who bought is in the details",
+    details: z.object({
+      ...stripeEvent,
+      orderId: z.string(),
+      buyerEmail: z.string(),
+      buyerUid: z.string().nullable(),
+      tickets: z.int(),
+      discount: z.int().optional(),
+    }),
   },
   "user.promote": {
     description: "Promoted to staff",

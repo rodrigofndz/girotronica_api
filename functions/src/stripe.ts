@@ -100,6 +100,22 @@ stripeWebhook.post("/", async (c) => {
           tx.update(order.ref, {
             status: "paid", paymentIntentId, paidAt: FieldValue.serverTimestamp(), amountPaid,
           } satisfies Partial<OrderWrite>);
+          const { promotionCode, buyer, uid, discount } = order.data() as Order;
+          if (promotionCode) {
+            audit(tx, {
+              actor: STRIPE_ACTOR,
+              action: "promotionCode.redeem",
+              target: { id: promotionCode.id, label: promotionCode.code },
+              details: {
+                stripeEventId: event.id,
+                orderId: order.id,
+                buyerEmail: buyer.email,
+                buyerUid: uid,
+                tickets: ticketIds.length,
+                ...(discount !== undefined && { discount }),
+              },
+            });
+          }
         }
 
         for (const doc of docs) {
