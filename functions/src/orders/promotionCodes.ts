@@ -24,6 +24,9 @@ const PromotionCodeViewSchema = z.object({
   percentOff: z.number().nullable(),
   amountOff: z.int().nullable().openapi({ description: "Cents" }),
   minimumAmount: z.int().nullable().openapi({ description: "Cents" }),
+  maxTickets: z.int().nullable().openapi({
+    description: "The most tickets (people) per order it takes off, from metadata.maxTickets on the promotion code or its coupon; null for no limit",
+  }),
   appliesTo: z.array(z.object({
     kind: z.enum(["ticketType", "extra"]).nullable().openapi({ description: "Null for a Stripe product we don't sell" }),
     id: z.string().openapi({ description: "Our type's or extra's id, or else the Stripe product id" }),
@@ -96,7 +99,7 @@ promotionCodes.openapi(
     const wanted = codes.filter((promo) => codeState(promo) === state);
     return c.json(wanted.map((promo) => {
       const problem = codeProblem(promo);
-      const { percentOff, amountOff, minimumAmount, products } = codeTerms(promo);
+      const { percentOff, amountOff, minimumAmount, products, maxTickets } = codeTerms(promo);
       return {
         id: promo.id,
         code: promo.code,
@@ -106,6 +109,7 @@ promotionCodes.openapi(
         percentOff,
         amountOff,
         minimumAmount,
+        maxTickets,
         appliesTo: products && products.map((p) => ours.get(p) ?? { kind: null, id: p, name: null }),
         expiresAt: iso(promo.expires_at),
         maxRedemptions: promo.max_redemptions,

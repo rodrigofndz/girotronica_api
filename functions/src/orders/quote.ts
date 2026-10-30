@@ -44,6 +44,9 @@ const QuoteViewSchema = z.object({
     percentOff: z.number().nullable(),
     amountOff: z.int().nullable().openapi({ description: "Cents" }),
     minimumAmount: z.int().nullable().openapi({ description: "Cents; the least the order must come to" }),
+    maxTickets: z.int().nullable().openapi({
+      description: "The most tickets (people) per order it takes off, from metadata.maxTickets in Stripe; null for no limit",
+    }),
     appliesTo: z.array(z.string()).nullable().openapi({
       description: "The ids of the lines it takes off; null for the whole order",
     }),
@@ -113,7 +116,7 @@ quote.openapi(
       promotionCode: !code ? null : !promo || !applied
         ? {
           code, applied: false, problem: { reason: "not_found" as const, message: `${code} doesn't exist` },
-          percentOff: null, amountOff: null, minimumAmount: null, appliesTo: null,
+          percentOff: null, amountOff: null, minimumAmount: null, maxTickets: null, appliesTo: null,
         }
         : {
           code: promo.code,
@@ -126,5 +129,5 @@ quote.openapi(
   },
 );
 
-const termsOf = ({ percentOff, amountOff, minimumAmount }: ReturnType<typeof codeTerms>) =>
-  ({ percentOff, amountOff, minimumAmount });
+const termsOf = ({ percentOff, amountOff, minimumAmount, maxTickets }: ReturnType<typeof codeTerms>) =>
+  ({ percentOff, amountOff, minimumAmount, maxTickets });

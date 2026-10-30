@@ -12,6 +12,7 @@ import type { Extra, TicketType } from "../types";
  */
 export const CODE_PROBLEMS = [
   "not_found", "inactive", "expired", "used_up", "restricted", "not_applicable", "below_minimum",
+  "too_many_tickets",
 ] as const;
 export type CodeProblem = { reason: (typeof CODE_PROBLEMS)[number]; message: string };
 
@@ -104,6 +105,17 @@ function amountOffInEuros(coupon: Stripe.Coupon): number | null | undefined {
 
 const euros = (cents: number) => `${(cents / 100).toFixed(2).replace(".", ",")} €`;
 
+/**
+ * The most tickets an order may have the code take off, from metadata.maxTickets on the
+ * promotion code or else on its coupon; null for no limit, undefined when it isn't a whole
+ * number above 0.
+ */
+function maxTicketsOf(promo: Stripe.PromotionCode): number | null | undefined {
+  const raw = (promo.metadata?.maxTickets ?? couponOf(promo)?.metadata?.maxTickets)?.trim();
+  if (!raw) return null;
+  return /^[1-9]\d*$/.test(raw) ? Number(raw) : undefined;
+}
+
 /** How the code is set up in Stripe, for showing it. */
 export function codeTerms(promo: Stripe.PromotionCode) {
   const coupon = couponOf(promo);
@@ -113,6 +125,8 @@ export function codeTerms(promo: Stripe.PromotionCode) {
     minimumAmount: minimumInEuros(promo) ?? null,
     // Null: the whole order
     products: coupon?.applies_to?.products ?? null,
+    // Null: no limit
+    maxTickets: maxTicketsOf(promo) ?? null,
   };
 }
 
@@ -142,6 +156,9 @@ export function codeProblem(promo: Stripe.PromotionCode, now = new Date()): Code
   if (amountOffInEuros(coupon) === undefined || minimumInEuros(promo) === undefined) {
     return { reason: "restricted", message: `${promo.code} isn't set up for euros` };
   }
+  if (maxTicketsOf(promo) === undefined) {
+    return { reason: "restricted", message: `${promo.code} has a maxTickets that isn't a whole number above 0` };
+  }
   return null;
 }
 
@@ -158,7 +175,7 @@ export function applyCode(
   const problem = codeProblem(promo, now);
   if (problem) return { ok: false, problem };
 
-  const { percentOff, amountOff, minimumAmount, products } = codeTerms(promo);
+  const { percentOff, amountOff, minimumAmount, products, maxTickets } = codeTerms(promo);
   const subtotal = lines.reduce((sum, l) => sum + l.amount, 0);
 
   if (minimumAmount !== null && subtotal < minimumAmount) {
@@ -173,6 +190,17 @@ export function applyCode(
   const base = covered.reduce((sum, l) => sum + l.amount, 0);
   if (base === 0) {
     return { ok: false, problem: { reason: "not_applicable", message: `${promo.code} doesn't apply to anything in this order` } };
+  }
+  // Each person counts, a pack's too, so one buyer can't take it off a whole batch to resell
+  const tickets = covered.filter((l) => l.kind === "ticketType").reduce((sum, l) => sum + l.quantity, 0);
+  if (maxTickets !== null && tickets > maxTickets) {
+    return {
+      ok: false,
+      problem: {
+        reason: "too_many_tickets",
+        message: `${promo.code} is for at most ${maxTickets} ticket${maxTickets === 1 ? "" : "s"} per order`,
+      },
+    };
   }
 
   const discount = percentOff !== null ? Math.round((base * percentOff) / 100) : Math.min(amountOff ?? 0, base);
