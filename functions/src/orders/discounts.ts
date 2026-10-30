@@ -1,4 +1,5 @@
 import { z } from "@hono/zod-openapi";
+import { getFirestore } from "firebase-admin/firestore";
 import { HTTPException } from "hono/http-exception";
 import type Stripe from "stripe";
 
@@ -12,7 +13,7 @@ import type { Extra, TicketType } from "../types";
  */
 export const CODE_PROBLEMS = [
   "not_found", "inactive", "expired", "used_up", "restricted", "not_applicable", "below_minimum",
-  "too_many_tickets",
+  "too_many_tickets", "already_used",
 ] as const;
 export type CodeProblem = { reason: (typeof CODE_PROBLEMS)[number]; message: string };
 
@@ -206,6 +207,22 @@ export function applyCode(
   const discount = percentOff !== null ? Math.round((base * percentOff) / 100) : Math.min(amountOff ?? 0, base);
   return { ok: true, discount, lineIds: products === null ? null : covered.map((l) => l.id) };
 }
+
+/**
+ * A code is taken once per buyer email: whether `email` already paid an order with it. Only
+ * paid orders count, so going back from Stripe and trying again still works.
+ */
+export const paidWithCode = async (promoId: string, email: string) =>
+  !(await getFirestore().collection("orders")
+    .where("promotionCode.id", "==", promoId)
+    .where("buyer.email", "==", email)
+    .where("status", "==", "paid")
+    .limit(1)
+    .get()).empty;
+
+/** Said without the reason, so it doesn't suggest using another email. */
+export const alreadyUsed = (promo: Stripe.PromotionCode): CodeProblem =>
+  ({ reason: "already_used", message: `${promo.code} has already been used` });
 
 /**
  * The code as the buyer typed it, matched without regard to case like Stripe does. Prefers an

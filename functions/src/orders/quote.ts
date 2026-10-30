@@ -4,11 +4,12 @@ import { HTTPException } from "hono/http-exception";
 import Stripe from "stripe";
 
 import { changesNothing } from "../audit/audit";
+import { EmailSchema } from "../schemas";
 import { stripeSecretKey } from "../stripe";
 import { isOnSale } from "../tickets/capacity";
 import { pairCompanions, WITH_DESCRIPTION, WithSchema } from "../tickets/companions";
 import { type Extra, priceAt, type TicketType } from "../types";
-import { applyCode, CODE_PROBLEMS, codeTerms, lookUpCode, priceLines, PromotionCodeSchema } from "./discounts";
+import { alreadyUsed, applyCode, CODE_PROBLEMS, codeTerms, lookUpCode, paidWithCode, priceLines, PromotionCodeSchema } from "./discounts";
 
 export const quote = new OpenAPIHono();
 
@@ -21,6 +22,9 @@ const QuoteSchema = z.object({
     }),
   })).min(1).max(20).openapi({ description: "One per person, as for buying; only what's priced" }),
   promotionCode: PromotionCodeSchema.optional(),
+  email: EmailSchema.optional().openapi({
+    description: "The buyer's email, once known: a code it already paid with is shown as not applied",
+  }),
 });
 
 const QuoteViewSchema = z.object({
@@ -76,7 +80,7 @@ quote.openapi(
     },
   }),
   async (c) => {
-    const { attendees, promotionCode: code } = c.req.valid("json");
+    const { attendees, promotionCode: code, email } = c.req.valid("json");
     const db = getFirestore();
 
     const typeIds = [...new Set(attendees.map((a) => a.typeId))];
@@ -105,7 +109,8 @@ quote.openapi(
 
     const lines = priceLines(attendees, types, extras);
     const subtotal = lines.reduce((sum, l) => sum + l.amount, 0);
-    const applied = promo && applyCode(promo, lines);
+    let applied = promo && applyCode(promo, lines);
+    if (applied?.ok && email && await paidWithCode(promo!.id, email)) applied = { ok: false, problem: alreadyUsed(promo!) };
     const discount = applied?.ok ? applied.discount : 0;
 
     return c.json({

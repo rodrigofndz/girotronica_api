@@ -20,7 +20,7 @@ import {
 import {
   type OrderWrite, type Ticket, type TicketExtra, type TicketType, type TicketWrite, typeSettings,
 } from "../types";
-import { applyCode, lookUpCode, type PriceLine, priceLines, PromotionCodeSchema } from "./discounts";
+import { alreadyUsed, applyCode, lookUpCode, paidWithCode, type PriceLine, priceLines, PromotionCodeSchema } from "./discounts";
 
 export const purchase = new OpenAPIHono<GuestEnv>();
 
@@ -105,7 +105,8 @@ purchase.openapi(
       403: { description: "Online sales are open to staff only for now (testing), or the account is suspended" },
       409: {
         description: "A ticket type or extra is sold out or not on sale, the promotion code can't be used " +
-          "(e.g. it was used up since the quote; quote again to show why), or the ticket a companion " +
+          "(e.g. it was used up since the quote, or the buyer's email already paid with it; quote again " +
+          "with the email to show why), or the ticket a companion " +
           "goes with can't take one (not active, already has one, or its type stopped taking them)",
       },
       502: { description: "Stripe checkout could not be started, or the promotion code could not be checked; nothing was reserved" },
@@ -135,6 +136,9 @@ purchase.openapi(
     const stripe = new Stripe(stripeSecretKey());
     const promo = code ? await lookUpCode(stripe, code) : null;
     if (code && !promo) throw new HTTPException(409, { message: `${code} doesn't exist` });
+    if (promo && await paidWithCode(promo.id, buyer.email)) {
+      throw new HTTPException(409, { message: alreadyUsed(promo).message });
+    }
 
     // One transaction so the stock checks and the tickets that take the stock can't interleave
     const { types, tickets, lines, hosts } = await db.runTransaction(async (tx) => {
