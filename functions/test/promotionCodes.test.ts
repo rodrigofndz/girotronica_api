@@ -226,6 +226,38 @@ describe("buying with a code", () => {
 
     expect(await orderDoc(res.body.orderId)).toMatchObject({ status: "paid", total: 720, amountPaid: 720 });
   });
+
+  it("logs the code as used once the order is paid, once even if Stripe retries", async () => {
+    givenCodes(promo("AMICS20", { percent_off: 20 }));
+    const res = await buy([attendee(), attendee({ typeId: "kids" })], "AMICS20");
+    const paid = {
+      id: "cs_test_1", object: "checkout.session", metadata: { orderId: res.body.orderId },
+      payment_status: "paid", payment_intent: "pi_1", amount_total: 720,
+    };
+    expect(await auditEntries("promotionCode.redeem")).toEqual([]);
+
+    await sendStripeEvent("checkout.session.completed", paid);
+    await sendStripeEvent("checkout.session.completed", paid);
+
+    const logged = await auditEntries("promotionCode.redeem");
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatchObject({
+      targetType: "promotionCode", targetId: "promo_AMICS20", targetLabel: "AMICS20", actorRole: "stripe",
+      details: { orderId: res.body.orderId, buyerEmail: buyerDetails.email, buyerUid: null, tickets: 2, discount: 180 },
+    });
+  });
+
+  it("logs no code for an order paid without one", async () => {
+    const res = await buy([attendee()]);
+
+    await sendStripeEvent("checkout.session.completed", {
+      id: "cs_test_1", object: "checkout.session", metadata: { orderId: res.body.orderId },
+      payment_status: "paid", payment_intent: "pi_1",
+    });
+
+    expect(await orderDoc(res.body.orderId)).toMatchObject({ status: "paid" });
+    expect(await auditEntries("promotionCode.redeem")).toEqual([]);
+  });
 });
 
 describe("the admin's list of codes", () => {
