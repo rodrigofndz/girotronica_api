@@ -103,7 +103,7 @@ describe("pricing an order", () => {
     expect(res.body).toMatchObject({ subtotal: 3300, discount: 660, total: 2640 });
     expect(res.body.promotionCode).toEqual({
       code: "AMICS20", applied: true, problem: null,
-      percentOff: 20, amountOff: null, minimumAmount: null, appliesTo: null,
+      percentOff: 20, amountOff: null, minimumAmount: null, maxTickets: null, appliesTo: null,
     });
   });
 
@@ -148,6 +148,37 @@ describe("pricing an order", () => {
     expect((await problem("DOLLARS")).reason).toBe("restricted");
     expect((await problem("LANONLY")).reason).toBe("not_applicable");
     expect(await problem("BIG")).toEqual({ reason: "below_minimum", message: "BIG needs an order of at least 20,00 €" });
+  });
+
+  it("takes off at most maxTickets people per order, counting only those it applies to", async () => {
+    givenCodes(promo("DOS", { percent_off: 10, applies_to: { products: ["prod_lan"] } }, { metadata: { maxTickets: "2" } }));
+
+    const two = await quote([lan(), lan(), attendee(), attendee({ extras: [{ extraId: "samarreta" }] })], "DOS");
+    const three = await quote([lan(), lan(), lan()], "DOS");
+
+    expect(two.body).toMatchObject({ discount: 700, promotionCode: { applied: true, maxTickets: 2 } });
+    expect(three.body).toMatchObject({ discount: 0, total: 10500 });
+    expect(three.body.promotionCode).toMatchObject({
+      applied: false, maxTickets: 2,
+      problem: { reason: "too_many_tickets", message: "DOS is for at most 2 tickets per order" },
+    });
+  });
+
+  it("reads maxTickets from the coupon too, the promotion code's own winning", async () => {
+    givenCodes(
+      promo("COUPON1", { percent_off: 10, metadata: { maxTickets: "1" } }),
+      promo("OWN3", { percent_off: 10, metadata: { maxTickets: "1" } }, { metadata: { maxTickets: "3" } }),
+      promo("BAD", { percent_off: 10 }, { metadata: { maxTickets: "two" } }),
+    );
+    const people = [attendee(), attendee()];
+
+    expect((await quote(people, "COUPON1")).body.promotionCode.problem).toEqual({
+      reason: "too_many_tickets", message: "COUPON1 is for at most 1 ticket per order",
+    });
+    expect((await quote(people, "OWN3")).body).toMatchObject({ discount: 180, promotionCode: { maxTickets: 3 } });
+    expect((await quote(people, "BAD")).body.promotionCode.problem).toEqual({
+      reason: "restricted", message: "BAD has a maxTickets that isn't a whole number above 0",
+    });
   });
 
   it("follows the coupon's own expiry and uses too", async () => {
@@ -206,6 +237,18 @@ describe("buying with a code", () => {
     expect(unknown.status).toBe(409);
     expect(await soldCount("general")).toBe(0);
     expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("refuses more people than the code's maxTickets, reserving nothing", async () => {
+    givenCodes(promo("DOS", { percent_off: 10 }, { metadata: { maxTickets: "2" } }));
+
+    const res = await buy([attendee(), attendee(), attendee()], "DOS");
+
+    expect(res.status).toBe(409);
+    expect(res.body).toBe("DOS is for at most 2 tickets per order");
+    expect(await soldCount("general")).toBe(0);
+    expect(createSession).not.toHaveBeenCalled();
+    expect((await buy([attendee(), attendee()], "DOS")).status).toBe(200);
   });
 
   it("asks Stripe for no discount without a code", async () => {
@@ -275,7 +318,7 @@ describe("the admin's list of codes", () => {
     expect(res.body).toEqual([
       {
         id: "promo_LAN10", code: "LAN10", state: "active", usable: true, problem: null,
-        percentOff: 10, amountOff: null, minimumAmount: null,
+        percentOff: 10, amountOff: null, minimumAmount: null, maxTickets: null,
         appliesTo: [
           { kind: "ticketType", id: "lan", name: "lan" },
           { kind: "extra", id: "samarreta", name: "samarreta" },
